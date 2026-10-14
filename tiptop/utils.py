@@ -19,6 +19,7 @@ from jaxtyping import Bool
 from PIL import Image
 
 from tiptop.config import config_dir, tiptop_cfg
+from tiptop.doosan.client import DoosanUONClient
 from tiptop.ur5.ur5_client import UR5Client
 
 gripper_mask_path = config_dir / "assets" / "gripper_mask.png"
@@ -79,7 +80,7 @@ def get_bamboo_client() -> BambooFrankaClient:
     )
 
 
-RobotClient = BambooFrankaClient | UR5Client
+RobotClient = BambooFrankaClient | UR5Client | DoosanUONClient
 
 
 def get_robot_client() -> RobotClient:
@@ -91,6 +92,10 @@ def get_robot_client() -> RobotClient:
         from tiptop.ur5.ur5_client import get_ur5_client
 
         return get_ur5_client()
+    elif cfg.robot.type == "m1013_uon":
+        from tiptop.doosan.client import get_doosan_client
+
+        return get_doosan_client()
     else:
         raise ValueError(f"Unknown robot type: {cfg.robot.type}")
 

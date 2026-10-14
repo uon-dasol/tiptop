@@ -1,7 +1,11 @@
 import logging
 import time
+from typing import TYPE_CHECKING
 
-from tiptop.utils import RobotClient, get_robot_client
+import numpy as np
+
+if TYPE_CHECKING:
+    from tiptop.utils import RobotClient
 
 _log = logging.getLogger(__name__)
 
@@ -10,9 +14,11 @@ class ExecutionFailure(Exception):
     """Failure in executing plan on robot."""
 
 
-def execute_cutamp_plan(cutamp_plan: list[dict], client: RobotClient | None = None) -> None:
-    """Execute the plan from cuTAMP on the real robot."""
+def execute_cutamp_plan(cutamp_plan: list[dict], client: "RobotClient | None" = None) -> None:
+    """Execute cuTAMP actions or serialized TiPToP steps in order."""
     if client is None:
+        from tiptop.utils import get_robot_client
+
         client = get_robot_client()
 
     start_time = time.perf_counter()
@@ -26,7 +32,8 @@ def execute_cutamp_plan(cutamp_plan: list[dict], client: RobotClient | None = No
         if action_type == "gripper":
             msg += f" ({action_dict['action']})"
         elif action_type == "trajectory":
-            msg += f" ({len(action_dict['plan'].position)} waypoints)"
+            positions = action_dict["plan"].position if "plan" in action_dict else action_dict["positions"]
+            msg += f" ({len(positions)} waypoints)"
         else:
             raise ValueError(f"Unknown action type in cuTAMP plan: {action_dict['type']}")
         _log.info(msg)
@@ -43,8 +50,12 @@ def execute_cutamp_plan(cutamp_plan: list[dict], client: RobotClient | None = No
 
         elif action_type == "trajectory":
             # Extract joint position and velocity waypoints for the trajectory
-            waypoints = action_dict["plan"].position.cpu().numpy()
-            velocities = action_dict["plan"].velocity.cpu().numpy()
+            if "plan" in action_dict:
+                waypoints = action_dict["plan"].position.cpu().numpy()
+                velocities = action_dict["plan"].velocity.cpu().numpy()
+            else:
+                waypoints = np.asarray(action_dict["positions"])
+                velocities = np.asarray(action_dict["velocities"])
             timings = [action_dict["dt"]] * len(waypoints)
             result = client.execute_joint_impedance_path(
                 joint_confs=waypoints, joint_vels=velocities, durations=timings
@@ -58,10 +69,11 @@ def execute_cutamp_plan(cutamp_plan: list[dict], client: RobotClient | None = No
             raise RuntimeError("Fatal error: result should not be None")
         if not result["success"]:
             raise ExecutionFailure(result["error"])
+        _log.info("Completed step %s/%s: %s", step + 1, len(cutamp_plan), result)
 
         action_duration = time.perf_counter() - action_start_time
         _log.debug(f"Executing {action_type} action took {action_duration:.2f}s")
 
     # Now we're done executing plan open-loop without any failures on the controller side
     duration = time.perf_counter() - start_time
-    _log.info(f"Real robot execution took {duration:.2f}s")
+    _log.info(f"Plan execution took {duration:.2f}s")
