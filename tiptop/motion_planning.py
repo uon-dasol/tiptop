@@ -23,6 +23,9 @@ from cutamp.robots.franka import (
     get_franka_ik_solver,
 )
 from cutamp.robots.franka_robotiq import fr3_robotiq_curobo_cfg, get_fr3_robotiq_ik_solver
+from tiptop.doosan.model import (
+    get_m1013_uon_ik_solver, load_m1013_uon_container, m1013_uon_curobo_cfg,
+)
 from cutamp.robots.ur5 import get_ur5_ik_solver, ur5_curobo_cfg
 from cutamp.utils.common import sample_between_bounds
 from jaxtyping import Float
@@ -53,6 +56,9 @@ def get_ik_solver(world_cfg: WorldConfig, num_particles: int, warmup_iters: int 
         elif cfg.robot.type == "panda":
             ik_solver = get_franka_ik_solver(world_cfg)
             container = load_panda_container(TensorDeviceType())
+        elif cfg.robot.type == "m1013_uon":
+            ik_solver = get_m1013_uon_ik_solver(world_cfg)
+            container = load_m1013_uon_container(TensorDeviceType())
         elif cfg.robot.type == "ur5":
             ik_solver = get_ur5_ik_solver(world_cfg)
             container = load_ur5_container(TensorDeviceType())
@@ -102,6 +108,8 @@ def get_motion_gen(
         robot_cfg = panda_robotiq_curobo_cfg()
     elif cfg.robot.type == "panda":
         robot_cfg = franka_curobo_cfg()
+    elif cfg.robot.type == "m1013_uon":
+        robot_cfg = m1013_uon_curobo_cfg()
     elif cfg.robot.type == "ur5":
         robot_cfg = ur5_curobo_cfg()
     else:
@@ -116,6 +124,7 @@ def get_motion_gen(
             robot_cfg=robot_cfg,
             world_model=world_cfg,
             use_cuda_graph=use_cuda_graph,
+            trajopt_particle_opt=cfg.robot.type != "m1013_uon",
             collision_activation_distance=collision_activation_distance,
             position_threshold=0.01,
             rotation_threshold=0.1,
@@ -169,7 +178,7 @@ def build_curobo_solvers(
 
 
 def go_to_q(
-    q_target: Float[np.ndarray, "7"] | list[float],
+    q_target: Float[np.ndarray, "d"] | list[float],
     time_dilation_factor: float,
     dist_tol: float = 0.05,
     motion_gen: MotionGen | None = None,
@@ -219,9 +228,15 @@ def go_to_q(
     # Execute on the robot
     plan = result.interpolated_plan
     dt = result.interpolation_dt
-    timings = [dt] * plan.position.shape[0]
+    positions = plan.position.cpu().numpy()
+    velocities = plan.velocity.cpu().numpy()
+    timings = [dt] * len(positions)
+    if tiptop_cfg().robot.type == "m1013_uon":
+        from tiptop.doosan.planning import prepare_joint_path
+
+        positions, velocities, timings = prepare_joint_path(positions, velocities, float(dt))
     result = client.execute_joint_impedance_path(
-        joint_confs=plan.position.cpu().numpy(), joint_vels=plan.velocity.cpu().numpy(), durations=timings
+        joint_confs=positions, joint_vels=velocities, durations=timings
     )
     client.close()
     if not result["success"]:

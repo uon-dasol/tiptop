@@ -112,6 +112,9 @@ def get_robot_rerun(robot_type: str | None = None) -> RerunRobot:
         return load_franka_rerun()
     elif robot_type == "fr3":
         return load_fr3_franka_rerun()
+    elif robot_type == "m1013_uon":
+        from tiptop.doosan.model import load_m1013_uon_rerun
+        return load_m1013_uon_rerun()
     elif robot_type == "ur5":
         return load_ur5_rerun()
     else:

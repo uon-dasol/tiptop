@@ -1,4 +1,4 @@
-"""Run from the top workspace: python -m tiptop.doosan status|open|close|stop|demo|run PLAN.json."""
+"""Run from the top workspace: python -m tiptop.doosan status|open|close|stop|demo|plan|run PLAN.json."""
 
 import argparse
 import json
@@ -13,7 +13,7 @@ from tiptop.execute_plan import execute_cutamp_plan
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8090")
-    parser.add_argument("command", choices=["status", "open", "close", "stop", "demo", "run"])
+    parser.add_argument("command", choices=["status", "open", "close", "stop", "demo", "plan", "run"])
     parser.add_argument("plan", nargs="?", type=Path)
     args = parser.parse_args()
     client = DoosanUONClient(args.url)
@@ -23,6 +23,26 @@ def main():
         result = client.stop()
     elif args.command in {"open", "close"}:
         result = getattr(client, f"{args.command}_gripper")()
+    elif args.command == "plan":
+        if args.plan is None:
+            args.plan = Path("tiptop_outputs/m1013/showcase.json")
+        from tiptop.doosan.planning import plan_showcase
+
+        try:
+            q = client.get_joint_positions()
+            plan = plan_showcase(q)
+            args.plan.parent.mkdir(parents=True, exist_ok=True)
+            args.plan.write_text(json.dumps(plan, indent=2, allow_nan=False) + "\n")
+            trajectories = [step for step in plan["steps"] if step["type"] == "trajectory"]
+            result = {"success": True, "plan_file": str(args.plan.resolve()),
+                      "scene": plan["scene"], "steps": len(plan["steps"]),
+                      "sequence": [step["label"] for step in plan["steps"]],
+                      "waypoints": sum(len(step["positions"]) for step in trajectories),
+                      "requested_duration_s": sum(len(step["positions"]) * step["dt"] for step in trajectories),
+                      "joint_offsets_deg": plan["joint_offsets_deg"], "returns_to_start": True,
+                      "sent_to_robot": False}
+        except Exception as exc:
+            result = {"success": False, "error": str(exc), "sent_to_robot": False}
     else:
         if args.command == "demo":
             q = client.get_joint_positions()
@@ -53,7 +73,7 @@ def main():
         import logging
 
         log_format = logging.BASIC_FORMAT
-        if args.command == "demo" and sys.stderr.isatty():
+        if sys.stderr.isatty():
             log_format = f"\033[93m{log_format}\033[0m"
         logging.basicConfig(level=logging.INFO, format=log_format)
         execute_cutamp_plan(plan["steps"], client)

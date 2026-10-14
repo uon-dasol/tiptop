@@ -11,6 +11,7 @@ fi
 
 REPO_URL="https://github.com/williamshen-nz/curobo.git"
 INSTALL_DIR="curobo"
+CUROBO_REVISION="b5fad1df2a3ac4d3e33e369918b7d62d0e59ebd1"
 
 echo "==> Installing curobo..."
 
@@ -38,13 +39,24 @@ if [ "$should_clone" = true ]; then
     git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-# Ensure we're on the latest origin/main
+# Use the revision verified with our collision patch, including on a fresh clone.
 cd curobo
-echo "Fetching latest from origin/main..."
-git fetch origin main
-git checkout main
-git pull --ff-only origin main
-echo "✓ curobo at main (tracking origin/main): $(git rev-parse --short HEAD)"
+echo "Fetching verified curobo revision..."
+git fetch origin "$CUROBO_REVISION"
+git checkout --detach "$CUROBO_REVISION"
+echo "✓ curobo at verified revision: $(git rev-parse --short HEAD)"
+
+# Keep the large-model self-collision fixes reproducible after a fresh clone.
+collision_patch="../patches/curobo-self-collision.patch"
+if git apply --reverse --check "$collision_patch" 2>/dev/null; then
+    echo "✓ self-collision fixes already applied"
+elif git apply --check "$collision_patch"; then
+    git apply "$collision_patch"
+    echo "✓ self-collision fixes applied"
+else
+    echo "ERROR: curobo changed; review patches/curobo-self-collision.patch before building"
+    exit 1
+fi
 
 # pip install (builds CUDA kernels too)
 echo "Installing curobo (might take 5-20 minutes)..."
