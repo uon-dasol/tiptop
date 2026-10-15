@@ -1,6 +1,6 @@
 """M1013/UON planning at the existing provisional model TCP.
 
-The arm has six planning joints; spinner and mimicked fingers are locked open.
+The arm has six planning joints; spinner and mimicked fingers are locked at the requested angle.
 Dataset grasp -> model TCP calibration is still required before object tasks.
 """
 
@@ -22,11 +22,16 @@ from cutamp.robots.utils import RerunRobot
 
 ASSETS = Path(__file__).parent / 'assets/m1013_uon'
 m1013_uon_home = (0.0,) * 6  # Model reference pose, not a calibrated physical home.
+OPEN_POSITION = 0.0
+CLOSED_POSITION = 1.5009832  # Same model endpoint as the ROS2 gateway.
 
 
-@lru_cache(maxsize=1)
-def m1013_uon_curobo_cfg():
+@lru_cache(maxsize=2)
+def m1013_uon_curobo_cfg(gripper_position=OPEN_POSITION):
+    if not OPEN_POSITION <= gripper_position <= CLOSED_POSITION:
+        raise ValueError('Gripper angle is outside the model limits')
     cfg = load_yaml(str(ASSETS / 'm1013_uon.yml'))
+    cfg['robot_cfg']['kinematics']['lock_joints']['gripper_spinner_joint'] = float(gripper_position)
     cfg['robot_cfg']['kinematics']['external_asset_path'] = str(ASSETS)
     cfg['robot_cfg']['kinematics']['external_robot_configs_path'] = str(ASSETS)
     return cfg

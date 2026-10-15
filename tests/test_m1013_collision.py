@@ -25,10 +25,31 @@ def test_clear_reference_and_showcase_poses(planner):
     from curobo.types.state import JointState
     motion, _ = planner
     q = np.radians([5, -5, 5, 2.5, 2.5, 2.5])
-    for positions in [np.zeros(6), q, q + np.radians([20, -20, 20, 15, -15, 25])]:
+    for positions in [np.zeros(6), q, q + np.radians([60, -30, 40, 15, -15, 25])]:
         valid, reason = motion.check_start_state(JointState.from_position(
             TensorDeviceType().to_device(positions[None])))
         assert valid, reason
+
+
+@pytest.mark.parametrize('angle', [0., 1.5009832], ids=['open', 'closed'])
+def test_locked_gripper_link_poses_match_urdf(angle):
+    import torch
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA required')
+    from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
+    from curobo.types.base import TensorDeviceType
+    from curobo.types.robot import RobotConfig
+    from yourdfpy import URDF
+    from tiptop.doosan.model import ASSETS, m1013_uon_curobo_cfg
+    tensor = TensorDeviceType()
+    model = CudaRobotModel(RobotConfig.from_dict(m1013_uon_curobo_cfg(angle)['robot_cfg'], tensor).kinematics)
+    q = np.array([.1, -.3, .5, .1, .2, -.1])
+    urdf = URDF.load(str(ASSETS / 'm1013_uon.urdf'), load_meshes=False)
+    urdf.update_cfg(dict(zip(model.joint_names, q)) | {'gripper_spinner_joint': angle})
+    state = model.get_state(tensor.to_device(q[None]))
+    for index, link in enumerate(model.link_names):
+        np.testing.assert_allclose(state.links_position[0, index].cpu(),
+                                   urdf.get_transform(link, 'base_link')[:3, 3], atol=2e-6)
 
 
 def test_world_rejection_preserves_self_collision_check_and_clear_recovery(planner):
