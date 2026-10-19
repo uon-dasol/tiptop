@@ -46,13 +46,13 @@ git fetch origin "$CUROBO_REVISION"
 git checkout --detach "$CUROBO_REVISION"
 echo "✓ curobo at verified revision: $(git rev-parse --short HEAD)"
 
-# Keep the large-model self-collision fixes reproducible after a fresh clone.
+# Restore collision-check state consistently after an invalid start query.
 collision_patch="../patches/curobo-self-collision.patch"
 if git apply --reverse --check "$collision_patch" 2>/dev/null; then
-    echo "✓ self-collision fixes already applied"
+    echo "✓ collision-check state fix already applied"
 elif git apply --check "$collision_patch"; then
     git apply "$collision_patch"
-    echo "✓ self-collision fixes applied"
+    echo "✓ collision-check state fix applied"
 else
     echo "ERROR: curobo changed; review patches/curobo-self-collision.patch before building"
     exit 1

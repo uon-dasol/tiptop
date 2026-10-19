@@ -84,7 +84,7 @@ def test_refined_spheres_cover_entire_collision_mesh_triangles():
     import yaml
     from scripts.fit_m1013_collision_spheres import ASSETS, load_collision_mesh
     spheres = yaml.safe_load((ASSETS / 'm1013_uon.yml').read_text())['robot_cfg']['kinematics']['collision_spheres']
-    for link in ['base_link', 'link_2']:
+    for link in spheres:
         mesh = load_collision_mesh(ASSETS, link)
         vertices, faces = trimesh.remesh.subdivide_to_size(
             mesh.vertices, mesh.faces, max_edge=.02, max_iter=12)
@@ -96,6 +96,29 @@ def test_refined_spheres_cover_entire_collision_mesh_triangles():
             # All three vertices in one sphere imply its entire triangle is covered.
             covered = (distances <= radii[None, :, None] - .0005).all(axis=-1).any(axis=-1)
             assert covered.all(), f'{link}: uncovered collision-mesh triangle'
+
+
+def test_compact_model_uses_experimental_kernel_with_object_capacity():
+    import torch
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA required')
+    from copy import deepcopy
+    from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
+    from curobo.types.base import TensorDeviceType
+    from curobo.types.robot import RobotConfig
+    from tiptop.doosan.model import m1013_uon_curobo_cfg
+    cfg = deepcopy(m1013_uon_curobo_cfg()['robot_cfg'])
+    cfg['kinematics']['extra_collision_spheres']['attached_object'] = 32
+    model = CudaRobotModel(RobotConfig.from_dict(cfg, TensorDeviceType()).kinematics)
+    assert model.get_self_collision_config().experimental_kernel
+
+
+def test_tamp_gripper_spheres_match_planning_geometry():
+    import yaml
+    from scripts.fit_m1013_collision_spheres import ASSETS, gripper_spheres_from_config
+    cfg = yaml.safe_load((ASSETS / 'm1013_uon.yml').read_text())
+    np.testing.assert_allclose(np.load(ASSETS / 'gripper_spheres_open.npy'),
+                               gripper_spheres_from_config(cfg, ASSETS), atol=1e-7)
 
 
 def test_reference_mesh_clearance_and_folded_mesh_intersection():

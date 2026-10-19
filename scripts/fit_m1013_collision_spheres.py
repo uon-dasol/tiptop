@@ -1,7 +1,8 @@
-"""Refine the M1013 base/lower-arm surface cover without removing collision pairs.
+"""Fit M1013 collision spheres without removing self-collision pairs.
 
 Run from the project root. Every subdivided collision-mesh triangle is wholly
-contained in one fitted sphere, with 1 mm padding. Other links are unchanged.
+contained in one fitted sphere, with 1 mm padding. Sparse link covers retain
+local base/lower-arm clearance.
 """
 import argparse
 import json
@@ -10,6 +11,8 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 from scipy.cluster.vq import kmeans2, vq
+from scipy.optimize import minimize
+from scipy.spatial import ConvexHull, QhullError
 from scipy.spatial.transform import Rotation
 import trimesh
 from yourdfpy import URDF
@@ -17,6 +20,12 @@ import yaml
 
 ASSETS = Path(__file__).resolve().parents[1] / 'tiptop/doosan/assets/m1013_uon'
 PADDING = .001
+
+# Sparse link models; refine only the base/lower-arm clearance region below.
+COMPACT_COUNTS = {'base_link': 5, 'link_1': 3, 'link_2': 10, 'link_3': 3,
+                  'link_4': 8, 'link_5': 3, 'link_6': 1, 'gripper_body': 3,
+                  'gripper_spinner': 2, 'gripper_finger1': 4,
+                  'gripper_finger2': 4, 'gripper_finger3': 4}
 
 
 def load_collision_mesh(assets, link):
@@ -37,128 +46,129 @@ def load_collision_mesh(assets, link):
     return trimesh.util.concatenate(pieces)
 
 
-def fit(assets, clusters_per_link=(12, 12), max_radius=.04):
-    path = assets / 'm1013_uon.yml'
-    config = yaml.safe_load(path.read_text())
+def fit(assets):
+    """Sparse link cover with local half-plane constraints at the base joint.
+
+    Each assigned triangle is enclosed by one sphere with 1 mm padding. Unlike
+    uniform fine subdivision, only clusters violating the base-joint clearance
+    planes are split. No self-collision pair is removed.
+    """
+    config = yaml.safe_load((assets / 'm1013_uon.yml').read_text())
     spheres = config['robot_cfg']['kinematics']['collision_spheres']
+    meshes = {link: load_collision_mesh(assets, link) for link in COMPACT_COUNTS}
     urdf = URDF.load(assets / 'm1013_uon.urdf', load_meshes=False)
+    # Original meshes have >16 mm vertical AABB clearance at these reference
+    # poses. Allow at most 7 mm sphere protrusion per side, retaining >2 mm gap.
+    normals, limits = [], []
+    for q2 in [-60, -30, 0, 30, 60]:
+        urdf.update_cfg({'joint_2': np.radians(q2)})
+        transform = urdf.get_transform('link_2', 'base_link')
+        points = trimesh.transform_points(meshes['link_2'].vertices, transform)
+        if points[:, 2].min() - meshes['base_link'].bounds[1, 2] <= .014:
+            raise ValueError('Mesh geometry no longer supports the base-joint clearance planes')
+        normals.append(np.r_[-transform[2, :3], 1.])
+        limits.append(transform[2, 3] - points[:, 2].min() + .007)
+    rng = np.random.default_rng(2026)
     report = {}
-    meshes, all_triangles, groups = {}, {}, {}
-    for link, clusters in zip(['base_link', 'link_2'], clusters_per_link):
-        mesh = load_collision_mesh(assets, link)
-        meshes[link] = mesh
-        vertices, faces = trimesh.remesh.subdivide_to_size(
-            mesh.vertices, mesh.faces, max_edge=.02, max_iter=12)
-        triangles = vertices[faces]
-        all_triangles[link] = triangles
-        centers = triangles.mean(axis=1)
-        seeds = centers[np.linspace(0, len(centers) - 1, clusters, dtype=int)]
-        cluster_centers, _ = kmeans2(centers, seeds, iter=20, minit='matrix', missing='raise')
-        assignments, _ = vq(centers, cluster_centers)
-        transform = urdf.get_transform(link, 'base_link')
-        fitted = []
-        groups[link] = []
-        max_excess = -float('inf')
+    for link, count in COMPACT_COUNTS.items():
+        mesh = meshes[link]
+        constrained = link in {'base_link', 'link_2'}
+        if constrained:
+            vertices, faces = trimesh.remesh.subdivide_to_size(
+                mesh.vertices, mesh.faces, max_edge=.02, max_iter=12)
+            triangles = vertices[faces]
+            centers = triangles.mean(axis=1)
+            count = 12 if link == 'base_link' else 16
+            seeds = centers[np.linspace(0, len(centers) - 1, count, dtype=int)]
+            _, assignment = kmeans2(centers, seeds, iter=20, minit='matrix', missing='raise')
+            planes = np.array([[0., 0., 1., 1.]]) if link == 'base_link' else np.array(normals)
+            bounds = np.array([mesh.bounds[1, 2] + .007]) if link == 'base_link' else np.array(limits)
+        else:
+            triangles = mesh.triangles
+            centers = triangles.mean(axis=1)
+            samples = rng.choice(len(centers), size=min(4096, len(centers)),
+                                 p=mesh.area_faces / mesh.area, replace=True)
+            seeds, _ = kmeans2(centers[samples], count, iter=30, minit='++', seed=2026, missing='raise')
+            assignment, _ = vq(centers, seeds)
+        fitted, excesses = [], []
 
         def cover(indices):
-            nonlocal max_excess
-            points = triangles[indices].reshape(-1, 3)
+            points = np.unique(triangles[indices].reshape(-1, 3), axis=0)
             center = (points.min(axis=0) + points.max(axis=0)) / 2
             radius = np.linalg.norm(points - center, axis=1).max() + PADDING
-            # Refine the base everywhere and the lower part of link_2 next to it.
-            base_z = points @ transform[2, :3] + transform[2, 3]
-            refine = link == 'base_link' or base_z.min() < .22
-            if refine and radius > max_radius and len(indices) > 1:
-                axis = np.ptp(centers[indices], axis=0).argmax()
-                ordered = indices[np.argsort(centers[indices, axis], kind='stable')]
-                split = len(ordered) // 2
-                cover(ordered[:split])
-                cover(ordered[split:])
-            else:
-                fitted.append({'center': center.tolist(), 'radius': float(radius)})
-                groups[link].append(indices)
-                max_excess = max(max_excess, float(
-                    (np.linalg.norm(points - center, axis=1) - radius).max()))
+            if constrained:
+                try:
+                    support = points[ConvexHull(points, qhull_options='QJ').vertices]
+                except QhullError:
+                    support = points
 
-        for cluster in range(clusters):
-            indices = np.flatnonzero(assignments == cluster)
+                def enclosure(x):
+                    return x[3] - PADDING - np.linalg.norm(support - x[:3], axis=1)
+
+                def enclosure_jac(x):
+                    delta = support - x[:3]
+                    return np.c_[delta / np.maximum(np.linalg.norm(delta, axis=1)[:, None], 1e-12),
+                                 np.ones(len(delta))]
+
+                solution = minimize(lambda x: x[3], np.r_[center, radius],
+                                    jac=lambda x: np.array([0., 0., 0., 1.]), method='SLSQP',
+                                    constraints=[{'type': 'ineq', 'fun': enclosure, 'jac': enclosure_jac},
+                                                 {'type': 'ineq', 'fun': lambda x: bounds - planes @ x,
+                                                  'jac': lambda x: -planes}],
+                                    bounds=[(None, None)] * 3 + [(.001, .12)],
+                                    options={'maxiter': 100, 'ftol': 1e-10})
+                center = solution.x[:3]
+                # Recheck every original point, regardless of solver status or hull reduction.
+                radius = np.linalg.norm(points - center, axis=1).max() + PADDING
+                if radius > .120001 or np.max(planes @ np.r_[center, radius] - bounds) > 1e-7:
+                    if len(indices) <= 1:
+                        raise ValueError(f'{link}: cannot cover a triangle within clearance planes')
+                    axis = np.ptp(centers[indices], axis=0).argmax()
+                    ordered = indices[np.argsort(centers[indices, axis], kind='stable')]
+                    for child in np.array_split(ordered, 2):
+                        cover(child)
+                    return
+            fitted.append({'center': center.tolist(), 'radius': float(radius)})
+            excesses.append(float((np.linalg.norm(points - center, axis=1) - radius).max()))
+
+        for cluster in range(count):
+            indices = np.flatnonzero(assignment == cluster)
             if len(indices):
                 cover(indices)
         report[link] = {'old_spheres': len(spheres[link]), 'new_spheres': len(fitted),
-                        'triangles_covered': len(triangles),
-                        'max_face_vertex_excess_m': max_excess}
+                        'triangles_covered': len(triangles), 'max_face_vertex_excess_m': max(excesses)}
         spheres[link] = fitted
-    # Only original-mesh AABB separation authorizes refinement. No link pair
-    # is excluded; every original triangle remains wholly covered with padding.
-    witnesses = []
-    for q1 in [-180, -120, -60, -30, 0, 30, 60, 120, 180]:
-        for q2 in [-60, -30, 0, 30, 60]:
-            urdf.update_cfg({'joint_1': np.radians(q1), 'joint_2': np.radians(q2)})
-            transform = urdf.get_transform('link_2', 'base_link').copy()
-            points = trimesh.transform_points(meshes['link_2'].vertices, transform)
-            bounds = np.array([points.min(axis=0), points.max(axis=0)])
-            base_bounds = meshes['base_link'].bounds
-            gap = np.maximum(bounds[0] - base_bounds[1], base_bounds[0] - bounds[1]).max()
-            if gap > 2 * PADDING:
-                witnesses.append(transform)
-    refinements = 0
-    while True:
-        base, arm = [np.array([[*s['center'], s['radius']] for s in spheres[link]])
-                     for link in ['base_link', 'link_2']]
-        worst, pair = 0., None
-        for transform in witnesses:
-            moved = trimesh.transform_points(arm[:, :3], transform)
-            depth = base[:, None, 3] + arm[None, :, 3] - np.linalg.norm(
-                base[:, None, :3] - moved[None], axis=-1)
-            i, j = np.unravel_index(depth.argmax(), depth.shape)
-            if depth[i, j] > worst:
-                worst, pair = float(depth[i, j]), (i, j)
-        if worst <= 1e-7:
-            break
-        candidates = [(spheres[link][i]['radius'], link, i) for link, i in
-                      zip(['base_link', 'link_2'], pair) if len(groups[link][i]) > 1]
-        if not candidates:
-            raise ValueError('Triangle resolution cannot preserve witnessed mesh clearance')
-        _, link, i = max(candidates)
-        indices = groups[link].pop(i)
-        spheres[link].pop(i)
-        triangles = all_triangles[link]
-        centers = triangles[indices].mean(axis=1)
-        axis = np.ptp(centers, axis=0).argmax()
-        ordered = indices[np.argsort(centers[:, axis], kind='stable')]
-        for child in np.array_split(ordered, 2):
-            points = triangles[child].reshape(-1, 3)
-            center = (points.min(axis=0) + points.max(axis=0)) / 2
-            radius = np.linalg.norm(points - center, axis=1).max() + PADDING
-            spheres[link].append({'center': center.tolist(), 'radius': float(radius)})
-            groups[link].append(child)
-        refinements += 1
-        if sum(len(v) for v in spheres.values()) + 4 >= 1024:
-            raise ValueError('Refinement exceeds current cuRobo sphere limit')
-    for link in groups:
-        excess = []
-        for sphere, indices in zip(spheres[link], groups[link]):
-            points = all_triangles[link][indices].reshape(-1, 3)
-            excess.append(float((np.linalg.norm(points - sphere['center'], axis=1)
-                                 - sphere['radius']).max()))
-        report[link]['new_spheres'] = len(spheres[link])
-        report[link]['max_face_vertex_excess_m'] = max(excess)
-    report['mesh_separated_witness_poses'] = len(witnesses)
-    report['local_refinements'] = refinements
-    total = sum(len(values) for values in spheres.values()) + 4
-    if total >= 1024:
-        raise ValueError(f'{total} spheres exceeds the current cuRobo kernel limit: {report}')
-    report['total_spheres_including_attachment'] = total
+    report['total_spheres_including_attachment'] = sum(map(len, spheres.values())) + 4
     return config, report
+
+
+def gripper_spheres_from_config(config, assets):
+    """Use the same sparse gripper geometry in the cuTAMP tool-frame sphere file."""
+    urdf = URDF.load(assets / 'm1013_uon.urdf', load_meshes=False)
+    rows = []
+    for link, values in config['robot_cfg']['kinematics']['collision_spheres'].items():
+        if link.startswith('gripper_'):
+            transform = urdf.get_transform(link, 'gripper_tcp')
+            for sphere in values:
+                center = transform[:3, :3] @ sphere['center'] + transform[:3, 3]
+                rows.append([*center, sphere['radius']])
+    return np.asarray(rows, dtype=np.float32)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--write', action='store_true', help='update the planning YAML')
+    parser.add_argument('--output', type=Path, help='save a candidate YAML without replacing the active model')
     args = parser.parse_args()
+    if args.output and not args.output.resolve().is_relative_to(ASSETS.parents[3]):
+        parser.error('--output must stay inside the TiPToP repository')
     config, report = fit(ASSETS)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(yaml.safe_dump(config, sort_keys=False))
     if args.write:
         (ASSETS / 'm1013_uon.yml').write_text(yaml.safe_dump(config, sort_keys=False))
+        np.save(ASSETS / 'gripper_spheres_open.npy', gripper_spheres_from_config(config, ASSETS))
     output = Path('tiptop_outputs/m1013/collision-sphere-coverage.json')
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2) + '\n')
