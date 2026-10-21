@@ -12,6 +12,7 @@ from tiptop.config import tiptop_cfg
 _log = logging.getLogger(__name__)
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
+DEFAULT_GEMINI_MODEL = "gemini-robotics-er-2-preview"
 
 
 @cache
@@ -66,8 +67,9 @@ def detect_and_translate(
     image: Image.Image,
     task_instruction: str,
     client: genai.Client | None = None,
-    model_id: str = "gemini-robotics-er-1.6-preview",
+    model_id: str = DEFAULT_GEMINI_MODEL,
     temperature: float | None = None,
+    max_output_tokens: int = 2048,
 ) -> tuple[list[dict], list[dict]]:
     """Detect objects and translate task in a single Gemini API call.
 
@@ -77,6 +79,7 @@ def detect_and_translate(
         client: Gemini API client. If None, a new client will be created.
         model_id: Gemini model ID to use.
         temperature: Temperature for generation.
+        max_output_tokens: Maximum generated tokens, including thinking tokens.
 
     Returns:
         Tuple of (bboxes, grounded_atoms) where:
@@ -89,7 +92,9 @@ def detect_and_translate(
         model=model_id,
         contents=[image, prompt],
         config=types.GenerateContentConfig(
-            temperature=temperature, thinking_config=types.ThinkingConfig(thinking_budget=0)
+            temperature=temperature,
+            thinking_config=types.ThinkingConfig(thinking_level="low"),
+            max_output_tokens=max_output_tokens,
         ),
     )
     return _parse_response(response.text)
@@ -99,8 +104,9 @@ async def detect_and_translate_async(
     image: Image.Image,
     task_instruction: str,
     client: genai.Client | None = None,
-    model_id: str = "gemini-robotics-er-1.6-preview",
+    model_id: str = DEFAULT_GEMINI_MODEL,
     temperature: float | None = None,
+    max_output_tokens: int = 2048,
 ) -> tuple[list[dict], list[dict]]:
     """Asynchronously detect objects and translate task in a single Gemini API call.
 
@@ -110,6 +116,7 @@ async def detect_and_translate_async(
         client: Gemini API client. If None, a new client will be created.
         model_id: Gemini model ID to use.
         temperature: Temperature for generation.
+        max_output_tokens: Maximum generated tokens, including thinking tokens.
 
     Returns:
         Tuple of (bboxes, grounded_atoms) where:
@@ -122,7 +129,9 @@ async def detect_and_translate_async(
         model=model_id,
         contents=[image, prompt],
         config=types.GenerateContentConfig(
-            temperature=temperature, thinking_config=types.ThinkingConfig(thinking_budget=0)
+            temperature=temperature,
+            thinking_config=types.ThinkingConfig(thinking_level="low"),
+            max_output_tokens=max_output_tokens,
         ),
     )
     return _parse_response(response.text)

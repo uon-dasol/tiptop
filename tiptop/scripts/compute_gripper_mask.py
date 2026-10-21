@@ -4,7 +4,8 @@ import logging
 
 import cv2
 import numpy as np
-from tiptop.perception.gemini import gemini_client, load_json
+from google.genai import types
+from tiptop.perception.gemini import DEFAULT_GEMINI_MODEL, gemini_client, load_json
 from PIL import Image
 from scipy.ndimage import binary_dilation, binary_fill_holes
 
@@ -23,7 +24,7 @@ The format should be as follows: [{"box_2d": [ymin, xmin, ymax, xmax], "label": 
 0-1000. The values in box_2d must only be integers""".strip()
 
 
-def compute_gripper_mask(gemini_model: str = "gemini-robotics-er-1.6-preview", dilation_iters: int = 8):
+def compute_gripper_mask(gemini_model: str = DEFAULT_GEMINI_MODEL, dilation_iters: int = 8):
     """
     Compute gripper mask using Gemini detection and SAM segmentation.
 
@@ -41,7 +42,13 @@ def compute_gripper_mask(gemini_model: str = "gemini-robotics-er-1.6-preview", d
 
     # Query Gemini to get gripper bounding box
     client = gemini_client()
-    response = client.models.generate_content(model=gemini_model, contents=[rgb_pil, _prompt])
+    response = client.models.generate_content(
+        model=gemini_model,
+        contents=[rgb_pil, _prompt],
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="low"), max_output_tokens=2048
+        ),
+    )
     bboxes: list = load_json(response.text)
     if len(bboxes) == 0:
         raise RuntimeError("No gripper detected! Try adjusting the camera view or prompt.")
