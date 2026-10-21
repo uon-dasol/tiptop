@@ -5,6 +5,7 @@ import numpy as np
 
 from tiptop.config import tiptop_cfg
 from tiptop.perception.cameras.frame import Frame
+from tiptop.perception.cameras.orbbec_camera import OrbbecCamera, orbbec_infer_depth_async
 from tiptop.perception.cameras.rs_camera import (
     RealsenseCamera,
     RealsenseFrame,
@@ -27,8 +28,21 @@ class Camera(Protocol):
     def close(self) -> None: ...
 
 
-def get_depth_estimator(cam: Camera) -> DepthEstimator:
-    """Get the appropriate FoundationStereo depth estimator for the given camera. Call once per camera."""
+def get_depth_estimator(cam: Camera, source: str = "foundation_stereo") -> DepthEstimator | None:
+    """Select FoundationStereo or the aligned metre depth provided by Frame."""
+    if source == "sensor":
+        return None
+    if source != "foundation_stereo":
+        raise ValueError(f"Unknown depth source {source!r}; choose 'sensor' or 'foundation_stereo'")
+    if callable(getattr(cam, "get_rectified_stereo_baseline", None)):
+        from tiptop.perception.cameras.stereo import infer_rectified_depth
+
+        baseline = cam.get_rectified_stereo_baseline()
+
+        async def _rectified_estimate(session: aiohttp.ClientSession, f: Frame) -> np.ndarray:
+            return await infer_rectified_depth(session, f, baseline)
+
+        return _rectified_estimate
     if isinstance(cam, ZedCamera):
         intrinsics = cam.get_intrinsics()
 
@@ -36,6 +50,13 @@ def get_depth_estimator(cam: Camera) -> DepthEstimator:
             return await zed_infer_depth_async(session, f, intrinsics)  # type: ignore[arg-type]
 
         return _zed_estimate
+    elif isinstance(cam, OrbbecCamera):
+        intrinsics = cam.get_intrinsics()
+
+        async def _orbbec_estimate(session: aiohttp.ClientSession, f: Frame) -> np.ndarray:
+            return await orbbec_infer_depth_async(session, f, intrinsics)  # type: ignore[arg-type]
+
+        return _orbbec_estimate
     elif isinstance(cam, RealsenseCamera):
         intrinsics = cam.get_intrinsics()
 
@@ -65,6 +86,9 @@ def get_hand_camera(depth: bool = False) -> Camera:
         return _get_zed_camera(cam_cfg, depth=depth)
     elif cam_type == "realsense":
         return RealsenseCamera(str(cam_cfg.serial), enable_depth=depth)
+    elif cam_type == "orbbec":
+        serial = cam_cfg.get("serial")
+        return OrbbecCamera(None if serial is None else str(serial), enable_depth=depth)
     else:
         raise ValueError(f"Unknown camera type: {cam_type}")
 
@@ -78,5 +102,8 @@ def get_external_camera() -> Camera:
         return _get_zed_camera(cam_cfg)
     elif cam_type == "realsense":
         return RealsenseCamera(str(cam_cfg.serial))
+    elif cam_type == "orbbec":
+        serial = cam_cfg.get("serial")
+        return OrbbecCamera(None if serial is None else str(serial))
     else:
         raise ValueError(f"Unknown camera type: {cam_type}")

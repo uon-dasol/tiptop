@@ -66,6 +66,7 @@ tiptop = { path = ".", editable = true }
 [tasks]
 # Installation tasks
 install-zed = "bash install/install-zed.sh"
+install-orbbec = "bash install/install-orbbec.sh"
 install-curobo = { cmd = "bash install/install-curobo.sh", env = { CUDA_HOME = "$CONDA_PREFIX", LD_LIBRARY_PATH = "$CONDA_PREFIX/lib:$LD_LIBRARY_PATH" } }
 install-cutamp = "bash install/install-cutamp.sh"
 install-pre-commit = "pre-commit install"

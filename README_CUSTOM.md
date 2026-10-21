@@ -50,6 +50,9 @@ pixi run setup-planners
 
 # ZED 카메라를 사용하는 경우에만 실행
 # pixi run install-zed
+
+# Orbbec Gemini 336L 카메라를 사용하는 경우에만 실행
+# pixi run install-orbbec
 ```
 
 ### 3. M2T2 설치

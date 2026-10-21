@@ -23,7 +23,9 @@ robot:
   q_capture: [-0.034, 0.090, 0.080, -1.319, -0.003, 1.253, 0.030]
 
 # == Camera configurations ==
-# Supported types: zed, realsense
+# Supported types: zed, realsense, orbbec (Gemini 336L)
+# Orbbec defaults to 1280x720@30; set its serial when multiple cameras are connected.
+# Wrist calibration must reference the RGB colour optical frame.
 # ZED cameras support optional resolution and fps settings:
 #   HD720: 15/30/60 fps, HD1080: 15/30 fps, HD2K: 15 fps
 #   If not specified, defaults to HD720 at 60 fps
@@ -33,6 +35,8 @@ cameras:
   hand:
     serial: "hand-serial"
     type: zed
+    # Optional mount: wrist (default) or fixed. Calibration is ee->camera for
+    # wrist, world->camera for fixed. "hand" is the legacy perception-camera key.
 
   # External camera is optional but helpful for recording execution and scene visualization script (viz-scene)
   external:
@@ -44,6 +48,8 @@ cameras:
 # == Perception services ==
 # No need to change these unless you're running them on a remote machine or changed the ports
 perception:
+  # Optional depth_source: foundation_stereo (default) or sensor.
+  # sensor uses Frame.depth, aligned to RGB and expressed in metres.
   foundation_stereo:
     url: "http://localhost:1234"
 
