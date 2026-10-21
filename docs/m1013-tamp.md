@@ -73,13 +73,17 @@ pixi run python -m tiptop.doosan run tiptop_outputs/m1013/tamp/verified/plan.jso
 - `--data`, `--cad` 생략 시 로컬 `data/black_pepper_shaker` 아래의
   `UON_3finger_gripper`와 `3d_model/edited/black_pepper_shaker.obj`를 사용한다.
 - CAD는 0.001m 축척으로 읽고 convex hull을 메모리에서 만든다.
-  물체 위치는 `[0.55, -0.12, 0.5]`m, 회전은 단위 회전이다.
-- 목표는 중심 `[0.55, 0.12, 0.4]`m의 18cm 사각 영역 위 배치인 `On(black_pepper_shaker, target)`이다.
+  물체 위치 기본값은 `[0.55, -0.12, 0.5]`m, 회전 기본값은 단위 회전이다.
+  `--object-rpy rx ry rz`로 월드 기준 XYZ Euler 회전(rad)을 지정할 수 있다.
+- 목표는 중심 `[0.65, 0.0, 0.38]`m, 크기 `[0.8, 0.8, 0.04]`m인 책상 위 배치
+  `On(black_pepper_shaker, target)`이다. 상판 높이는 0.4m이며 `--target-xyz`, `--target-dims`로 바꿀 수 있다.
   정확한 최종 6D 자세 지정은 아니다.
 - 파지 후보는 DB index 0(`scene_id=0072`, `source_pregrasp_index=443`) 하나다.
-  DB grasp→모델 TCP는 임시 `Rx(pi)`, 이동 0이며 `--grasp-from-tcp MATRIX.json`으로 지정할 수 있다.
+  DB grasp→모델 TCP의 기본값은 단위 변환(추가 회전 없음·이동 0)이다.
+  기록된 접촉점과 손가락 형상을 비교해 임시 `Rx(pi)`를 제거했다. 이동 0과 물리 파지는 미검증이며,
+  `--grasp-from-tcp MATRIX.json`으로 변환을 지정할 수 있다. 기존 저장 계획은 재생성해야 반영된다.
 - 계획 중 그리퍼 형상은 열린 상태로 고정한다. 실행 개폐는 기존 모델 endpoint를 사용한다.
-  후추통이 옆으로 놓이고 손가락 끝 쪽에 보이는 한계가 남아 있다.
+  기존 `verified/plan.json`에는 이전 물체 배치·임시 회전이 남아 있으므로 현재 파지 검증 결과로 취급하지 않는다.
 - 외부 cuTAMP는 수정하지 않는다. 전용 프로세스 안에서 로봇 이름 검증·container 로딩을 임시 연결하고 복구한다.
 - 실환경 파지 전 DB grasp→body/TCP·flange 장착 변환을 확인·보정해야 한다.
   접촉·파지력·미끄러짐·물리적 들림은 이번 검증에 포함하지 않는다.

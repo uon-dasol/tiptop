@@ -80,3 +80,18 @@ def test_actual_client_and_gateway_validator_accept_existing_terminal_hold():
     calls = verify_gateway_contract(plan)
     np.testing.assert_array_equal(q[:len(original)], original)
     assert calls == [{"type": "trajectory", "waypoints": len(q), "dof": 6}]
+
+
+def test_motion_world_conversion_preserves_movable_and_static_scene_membership():
+    from types import SimpleNamespace
+    from curobo.geom.types import Cuboid
+    from tiptop.doosan.tamp import motion_world_cfg
+
+    pepper = Cuboid(name="pepper", dims=[.05] * 3, pose=[.55, 0, .5, 1, 0, 0, 0])
+    table = Cuboid(name="table", dims=[.8, .8, .04], pose=[.65, 0, .38, 1, 0, 0, 0])
+    env = SimpleNamespace(movables=[pepper], statics=[table])
+    for _ in range(2):
+        world = motion_world_cfg(env)
+        assert [obj.name for obj in world.cuboid] == ["pepper", "table"]
+        assert env.movables == [pepper]
+        assert env.statics == [table]

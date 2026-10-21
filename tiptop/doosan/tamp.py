@@ -19,6 +19,15 @@ ROOT = Path(__file__).resolve().parents[2]
 OBJECT = "black_pepper_shaker"
 DATA = ROOT / "data" / OBJECT / "UON_3finger_gripper"
 CAD = ROOT / "data" / OBJECT / "3d_model/edited/black_pepper_shaker.obj"
+DEFAULT_TARGET_XYZ = (.65, 0., .38)
+DEFAULT_TARGET_DIMS = (.8, .8, .04)
+
+
+def motion_world_cfg(env):
+    """Keep upstream world conversion from appending statics to env.movables."""
+    from cutamp.utils.common import get_world_cfg
+
+    return get_world_cfg(deepcopy(env), include_movables=True)
 
 
 @contextmanager
@@ -50,12 +59,14 @@ def m1013_entrypoint(container):
         yield
 
 
-def load_case(data, cad, candidate_index, object_xyz, target_xyz, grasp_from_tcp=None):
+def load_case(data, cad, candidate_index, object_xyz, target_xyz, grasp_from_tcp=None,
+              object_rpy=(0., 0., 0.), target_dims=DEFAULT_TARGET_DIMS):
     """Read source assets only; create a small convex planning mesh in memory."""
     import trimesh
     from curobo.geom.types import Cuboid, Mesh
     from cutamp.envs import TAMPEnvironment
     from cutamp.tamp_domain import On
+    from scipy.spatial.transform import Rotation
 
     merged = json.loads((data / f"{OBJECT}_merged_grasp_zero_pose.json").read_text())
     if merged["metadata"]["coordinate_frame"] != "object_zero_pose":
@@ -64,16 +75,20 @@ def load_case(data, cad, candidate_index, object_xyz, target_xyz, grasp_from_tcp
     vertices = np.array([list(map(float, line.split()[1:4]))
                          for line in cad.read_text().splitlines() if line.startswith("v ")]) * .001
     hull = trimesh.convex.convex_hull(vertices)
-    obj = Mesh(name=OBJECT, pose=[*object_xyz, 1, 0, 0, 0],
+    xyzw = Rotation.from_euler('xyz', object_rpy).as_quat()
+    object_pose = [*object_xyz, float(xyzw[3]), *xyzw[:3].tolist()]
+    obj = Mesh(name=OBJECT, pose=object_pose,
                vertices=hull.vertices.tolist(), faces=hull.faces.tolist())
-    target = Cuboid(name="target", dims=[.18, .18, .02], pose=[*target_xyz, 1, 0, 0, 0])
+    if len(target_dims) != 3 or not np.isfinite(target_dims).all() or np.any(np.asarray(target_dims) <= 0):
+        raise ValueError('target_dims must contain three positive finite dimensions')
+    target = Cuboid(name="target", dims=list(target_dims), pose=[*target_xyz, 1, 0, 0, 0])
     env = TAMPEnvironment("m1013_one_pepper", [obj], [target],
                           {"Movable": [obj], "Surface": [target]},
                           frozenset({On.ground(OBJECT, "target")}))
 
-    # Explicitly provisional: align model +Z toward the object, opposite DB +Z.
-    # Zero translation is an assumption, not a recovered/calibrated TCP offset.
-    transform = np.diag([1., -1., -1., 1.]) if grasp_from_tcp is None else np.asarray(grasp_from_tcp)
+    # Recorded contacts fit the model fingers without the former Rx(pi) flip.
+    # Zero translation remains provisional; this is not a calibrated TCP offset.
+    transform = np.eye(4) if grasp_from_tcp is None else np.asarray(grasp_from_tcp)
     if (transform.shape != (4, 4) or not np.isfinite(transform).all()
             or not np.allclose(transform[3], [0, 0, 0, 1])
             or not np.allclose(transform[:3, :3].T @ transform[:3, :3], np.eye(3), atol=1e-5)
@@ -84,10 +99,12 @@ def load_case(data, cad, candidate_index, object_xyz, target_xyz, grasp_from_tcp
               "source_pregrasp_index": row["source_pregrasp_index"], "score": row["score"],
               "data": str(data.resolve()), "cad": str(cad.resolve()), "obj_to_m_scale": .001,
               "object_xyz": list(object_xyz), "target_xyz": list(target_xyz),
+              "target_dims": list(target_dims),
+              "object_rpy": list(object_rpy), "object_pose": object_pose,
               "goal": f"On({OBJECT}, target)", "goal_is_region_not_exact_pose": True,
               "object_extent_m": np.ptp(vertices, axis=0).tolist(),
               "db_grasp_from_model_tcp": transform.tolist(), "frame_calibrated": False,
-              "frame_source": "provisional_Rx_pi_zero_translation" if grasp_from_tcp is None else "user_supplied",
+              "frame_source": "contact_checked_identity_zero_translation" if grasp_from_tcp is None else "user_supplied",
               "model_gripper_locked_open_during_planning": True,
               "physical_grasp_verified": False}
     return env, obj_from_tcp, inputs
@@ -139,7 +156,7 @@ def check(args, output, report):
     np.random.seed(args.seed)
     transform = json.loads(args.grasp_from_tcp.read_text()) if args.grasp_from_tcp else None
     env, obj_from_tcp, inputs = load_case(args.data, args.cad, args.candidate, args.object_xyz,
-                                         args.target_xyz, transform)
+                                         args.target_xyz, transform, args.object_rpy, args.target_dims)
     report.update(inputs)
     report["stage"] = "initialization"
     tensor_args = TensorDeviceType()
@@ -163,7 +180,7 @@ def check(args, output, report):
         robot_cfg = deepcopy(m1013_uon_curobo_cfg())
         robot_cfg["robot_cfg"]["kinematics"]["extra_collision_spheres"]["attached_object"] = config.coll_n_spheres
         mg = MotionGen(MotionGenConfig.load_from_robot_config(
-            robot_cfg=robot_cfg, world_model=get_world_cfg(env, include_movables=True),
+            robot_cfg=robot_cfg, world_model=motion_world_cfg(env),
             use_cuda_graph=False, trajopt_particle_opt=False, num_trajopt_seeds=8, num_graph_seeds=8,
             position_threshold=.01, rotation_threshold=.1))
         report["motion_gen_dof"] = mg.kinematics.get_dof()
@@ -228,7 +245,10 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "tiptop_outputs/m1013/tamp")
     parser.add_argument("--candidate", type=int, default=0)
     parser.add_argument("--object-xyz", type=float, nargs=3, default=[.55, -.12, .5])
-    parser.add_argument("--target-xyz", type=float, nargs=3, default=[.55, .12, .4])
+    parser.add_argument("--object-rpy", type=float, nargs=3, default=[0.] * 3,
+                        help="Object rotation in world coordinates, XYZ Euler radians")
+    parser.add_argument("--target-xyz", type=float, nargs=3, default=DEFAULT_TARGET_XYZ)
+    parser.add_argument("--target-dims", type=float, nargs=3, default=DEFAULT_TARGET_DIMS)
     parser.add_argument("--q-init", type=float, nargs=6, default=[0.] * 6)
     parser.add_argument("--grasp-from-tcp", type=Path, help="JSON 4x4 DB-grasp-from-model-TCP transform")
     parser.add_argument("--particles", type=int, default=32)
