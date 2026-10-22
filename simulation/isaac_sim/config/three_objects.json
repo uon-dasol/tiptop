@@ -1,0 +1,158 @@
+[
+  {
+    "class": "black_pepper_shaker",
+    "asset": "data/black_pepper_shaker/3d_model/edited/black_pepper_shaker_rigid.usd",
+    "cad": "data/black_pepper_shaker/3d_model/edited/black_pepper_shaker.obj",
+    "db_directory": "data/black_pepper_shaker/UON_3finger_gripper",
+    "asset_scale": [
+      0.1,
+      0.1,
+      0.1
+    ],
+    "mass_source": "existing rigid USD",
+    "db_count": 4892,
+    "instance_id": "black_pepper_shaker-01",
+    "world_from_object": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.5
+      ],
+      [
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        -0.2
+      ],
+      [
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.439722549
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "world_bounds": [
+      [
+        0.468397104,
+        -0.217563576,
+        0.402
+      ],
+      [
+        0.529176605,
+        -0.181674704,
+        0.483304096
+      ]
+    ]
+  },
+  {
+    "class": "car_leather_conditioner_bottle",
+    "asset": "data/car_leather_conditioner_bottle/3d_model/edited/car_leather_conditioner_bottle_rigid.usd",
+    "cad": "data/car_leather_conditioner_bottle/3d_model/edited/car_leather_conditioner_bottle.obj",
+    "db_directory": "data/car_leather_conditioner_bottle/UON_3finger_gripper",
+    "asset_scale": [
+      0.1,
+      0.1,
+      0.1
+    ],
+    "mass_source": "existing rigid USD",
+    "db_count": 5852,
+    "instance_id": "car_leather_conditioner_bottle-01",
+    "world_from_object": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.5
+      ],
+      [
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.12
+      ],
+      [
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.434860607
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "world_bounds": [
+      [
+        0.465650223,
+        0.10424639300000002,
+        0.402
+      ],
+      [
+        0.531655308,
+        0.135761861,
+        0.556064129
+      ]
+    ]
+  },
+  {
+    "class": "disney_mickey_handled_dipper",
+    "asset": "data/disney_mickey_handled_dipper/3d_model/edited/disney_mickey_handled_dipper_rigid.usd",
+    "cad": "data/disney_mickey_handled_dipper/3d_model/edited/disney_mickey_handled_dipper.obj",
+    "db_directory": "data/disney_mickey_handled_dipper/UON_3finger_gripper",
+    "asset_scale": [
+      0.1,
+      0.1,
+      0.1
+    ],
+    "mass_source": "existing rigid USD",
+    "db_count": 5184,
+    "instance_id": "disney_mickey_handled_dipper-01",
+    "world_from_object": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.82
+      ],
+      [
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        -0.06
+      ],
+      [
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.455337906
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "world_bounds": [
+      [
+        0.756556942,
+        -0.125370056,
+        0.402
+      ],
+      [
+        0.883526077,
+        0.117353546,
+        0.499602387
+      ]
+    ]
+  }
+]

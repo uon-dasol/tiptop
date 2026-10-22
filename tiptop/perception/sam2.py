@@ -9,12 +9,11 @@ from functools import cache
 import numpy as np
 import requests
 import torch.cuda
-from PIL import Image
 from jaxtyping import Float
+from PIL import Image
 from tqdm import tqdm
 
 from tiptop.config import tiptop_cfg
-from tiptop.utils import get_tiptop_cache_dir
 
 _log = logging.getLogger(__name__)
 
@@ -23,6 +22,8 @@ _SAM2_BASE_URL = "https://dl.fbaipublicfiles.com/segment_anything_2/092824"
 
 def download_sam2_checkpoint(model_name: str = "sam2.1_hiera_large.pt") -> str:
     """Download SAM2 checkpoint if it doesn't already exist."""
+    from tiptop.utils import get_tiptop_cache_dir
+
     model_url = os.path.join(_SAM2_BASE_URL, model_name)
     dest_path = get_tiptop_cache_dir() / model_name
 
@@ -87,10 +88,9 @@ def _segment_remote(image: Image.Image, boxes: np.ndarray, server_url: str) -> t
         response.raise_for_status()
         result = response.json()
 
-        masks = np.array([
-            [np.load(io.BytesIO(base64.b64decode(m))) for m in mask_batch]
-            for mask_batch in result["masks"]
-        ])
+        masks = np.array(
+            [[np.load(io.BytesIO(base64.b64decode(m))) for m in mask_batch] for mask_batch in result["masks"]]
+        )
         return masks, np.array(result["scores"])
 
     except Exception as e:
@@ -134,27 +134,32 @@ def sam2_segment_objects(
     cfg = tiptop_cfg()
     mode = cfg.perception.sam.mode
 
-    # Convert Gemini bbox format [ymin, xmin, ymax, xmax] (0-1000) to SAM2 [x0, y0, x1, y1] (pixels)
     img_height, img_width = rgb_pil.height, rgb_pil.width
-    boxes = np.array([
-        [
-            (xmin / 1000.0) * img_width,
-            (ymin / 1000.0) * img_height,
-            (xmax / 1000.0) * img_width,
-            (ymax / 1000.0) * img_height,
-        ]
-        for detection in detection_results
-        if len(box_2d := detection.get("box_2d", [])) == 4
-        for ymin, xmin, ymax, xmax in [box_2d]
-    ])
+    if not detection_results:
+        return np.zeros((0, 1, img_height, img_width), dtype=bool)
+    # Reject malformed boxes rather than silently shifting mask/label indices.
+    normalized = np.asarray([detection.get("box_2d", []) for detection in detection_results], dtype=float)
+    if (
+        normalized.shape != (len(detection_results), 4)
+        or not np.isfinite(normalized).all()
+        or np.any(normalized < 0)
+        or np.any(normalized > 1000)
+        or np.any(normalized[:, 2:] <= normalized[:, :2])
+    ):
+        raise ValueError("SAM2 requires one valid normalized [ymin,xmin,ymax,xmax] box per detection")
+    boxes = normalized[:, [1, 0, 3, 2]] * np.array([img_width, img_height, img_width, img_height]) / 1000.0
 
     _log.info(f"Segmenting {len(boxes)} objects using SAM2 in {mode} mode")
     if mode == "local":
         masks, scores = _segment_local(rgb_pil, boxes, str(download_sam2_checkpoint()))
-    else:
+    elif mode == "remote":
         masks, scores = _segment_remote(rgb_pil, boxes, cfg.perception.sam.url)
+    else:
+        raise ValueError(f"Invalid SAM2 mode: {mode}")
     _log.info(f"Generated {len(masks)} segmentation masks, shape: {masks.shape}")
 
     if masks.ndim == 3:
-        masks = masks[None]
-    return masks
+        masks = masks[:, None]
+    if masks.shape != (len(detection_results), 1, img_height, img_width):
+        raise ValueError(f"SAM2 returned masks with unexpected shape: {masks.shape}")
+    return masks.astype(bool)

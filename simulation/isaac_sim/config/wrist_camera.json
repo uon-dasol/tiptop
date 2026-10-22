@@ -1,0 +1,74 @@
+{
+  "success": true,
+  "profile": {
+    "model_name": "gemini_336l_envelope",
+    "sensor_model_name": "ideal_rectified_color_stereo",
+    "target_hardware": "Orbbec Gemini 336L",
+    "source": "https://www.orbbec.com/gemini-330-series/",
+    "body_dims_m": [
+      0.124,
+      0.029,
+      0.0277
+    ],
+    "baseline_m": 0.095,
+    "body_geometry": "datasheet box envelope; not detailed CAD",
+    "parent_link": "link_6",
+    "parent_from_rig": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.15
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.015
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "bracket_dims_m": [
+      0.07,
+      0.025,
+      0.015
+    ],
+    "rig_from_bracket_xyz_m": [
+      -0.06,
+      0,
+      -0.03
+    ],
+    "collision_margin_m": 0.002,
+    "resolution_wh": [
+      640,
+      400
+    ],
+    "horizontal_fov_deg": 90,
+    "optics": "ideal rectified pinholes; chosen virtual mode, not calibrated device intrinsics",
+    "mount_calibrated": false,
+    "bracket_source": "provisional wrist-side envelope, four static mount orientations checked against existing spheres; not a fabricated mounting design",
+    "mass_and_inertia_calibrated": false,
+    "hardware_rgb_ir_registration_modelled": false
+  },
+  "q_capture": [
+    -0.21495522558689117,
+    0.13953974843025208,
+    1.1753649711608887,
+    0.00041131238685920835,
+    -4.456700325012207,
+    1.355738878250122
+  ],
+  "scope": "Previously checked provisional virtual wrist mount; not real hand-eye calibration",
+  "source": "2026-10-21 camera-aware capture IK"
+}

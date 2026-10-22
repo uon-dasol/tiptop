@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import shutil
 import signal
@@ -38,7 +39,8 @@ from tiptop.perception.cameras import (
     get_external_camera,
     get_hand_camera,
 )
-from tiptop.perception.m2t2 import m2t2_to_tiptop_transform
+from tiptop.perception.cameras.geometry import camera_world_pose
+from tiptop.perception.m2t2 import generate_grasps_async, m2t2_to_tiptop_transform
 from tiptop.perception.sam2 import sam2_client
 from tiptop.perception.segmentation import (
     masked_object_points,
@@ -47,7 +49,7 @@ from tiptop.perception.segmentation import (
 )
 from tiptop.perception.shape_completion import reconstruct_objects_with_recgen
 from tiptop.perception.utils import convert_trimesh_box_to_curobo_cuboid, convert_trimesh_to_curobo_mesh
-from tiptop.perception_wrapper import detect_and_segment, predict_depth_and_grasps
+from tiptop.perception_wrapper import run_visual_perception
 from tiptop.planning import build_tamp_config, run_planning, save_tiptop_plan, serialize_plan
 from tiptop.recording import (
     record_cameras,
@@ -96,13 +98,14 @@ class _DemoContainer:
     cam: Camera
     external_cam: Camera | None
     enable_recording: bool
-    ee_from_cam: Float[np.ndarray, "4 4"]
-    depth_estimator: DepthEstimator
+    camera_parent_from_cam: Float[np.ndarray, "4 4"]
+    depth_estimator: DepthEstimator | None
 
-    gripper_mask: Bool[np.ndarray, "h w"]
+    gripper_mask: Bool[np.ndarray, "h w"] | None
 
     ik_solver: IKSolver
     motion_gen: MotionGen
+    camera_mount: str = "wrist"
 
 
 @dataclass
@@ -113,14 +116,19 @@ class ProcessedScene:
     object_meshes: dict[str, Mesh]
     object_pcds: dict[str, o3d.geometry.PointCloud]
     grasps: dict[str, dict]  # Label -> grasp data with tensor versions
+    perception_results: dict | None = None
 
 
 def capture_live_observation(container: _DemoContainer) -> Observation:
-    """Read robot joint positions and compute world_from_cam via forward kinematics."""
+    """Read current robot state and a wrist/fixed camera into one Observation."""
     q_curr = container.robot.get_joint_positions()
-    q_curr_pt = tensor_args.to_device(q_curr)
-    world_from_ee = container.motion_gen.kinematics.get_state(q_curr_pt).ee_pose.get_numpy_matrix()[0]
-    world_from_cam = world_from_ee @ container.ee_from_cam
+    world_from_ee = None
+    if container.camera_mount == "wrist":
+        q_curr_pt = tensor_args.to_device(q_curr)
+        world_from_ee = container.motion_gen.kinematics.get_state(q_curr_pt).ee_pose.get_numpy_matrix()[0]
+    world_from_cam = camera_world_pose(
+        container.camera_parent_from_cam, mount=container.camera_mount, world_from_ee=world_from_ee
+    )
     frame = container.cam.read_camera()
     return Observation(frame=frame, world_from_cam=world_from_cam, q_init=q_curr)
 
@@ -130,12 +138,19 @@ def get_demo_container(
 ) -> _DemoContainer:
     """Cache and warm-up everything needed for the live demo."""
     _log.info("Starting demo warmup...")
+    cfg = tiptop_cfg()
+    camera_mount = cfg.cameras.hand.get("mount", "wrist")
+    depth_source = cfg.perception.get("depth_source", "foundation_stereo")
+    if camera_mount not in {"wrist", "fixed"}:
+        raise ValueError("cameras.hand.mount must be 'wrist' or 'fixed'")
+    if depth_source not in {"sensor", "foundation_stereo"}:
+        raise ValueError("perception.depth_source must be 'sensor' or 'foundation_stereo'")
     client = get_robot_client()
 
     # Setup cameras
-    cam = get_hand_camera()
-    external_cam = get_external_camera()
-    ee_from_cam = load_calibration(cam.serial)
+    cam = get_hand_camera(depth=depth_source == "sensor")
+    external_cam = get_external_camera() if enable_recording else None
+    camera_parent_from_cam = load_calibration(cam.serial)
 
     # External camera for recording (if enabled)
     if enable_recording:
@@ -162,25 +177,40 @@ def get_demo_container(
         cam=cam,
         external_cam=external_cam,
         enable_recording=enable_recording,
-        ee_from_cam=ee_from_cam,
-        depth_estimator=get_depth_estimator(cam),
-        gripper_mask=load_gripper_mask(),
+        camera_parent_from_cam=camera_parent_from_cam,
+        camera_mount=camera_mount,
+        depth_estimator=get_depth_estimator(cam, source=depth_source),
+        gripper_mask=load_gripper_mask() if camera_mount == "wrist" else None,
         ik_solver=ik_solver,
         motion_gen=motion_gen,
     )
 
 
 async def check_server_health(session: aiohttp.ClientSession):
-    """Check health of FoundationStereo, M2T2, and (optionally) RecGen servers."""
+    """Check the configured perception services; sensor depth needs no depth server."""
     from tiptop.perception.foundation_stereo import check_health_status as fs_check_health_status
     from tiptop.perception.m2t2 import check_health_status as m2t2_check_health_status
     from tiptop.perception.recgen import check_health_status as recgen_check_health_status
 
     cfg = tiptop_cfg()
-    health_checks = [
-        fs_check_health_status(session, cfg.perception.foundation_stereo.url),
-        m2t2_check_health_status(session, cfg.perception.m2t2.url),
-    ]
+    depth_source = cfg.perception.get("depth_source", "foundation_stereo")
+    if depth_source not in {"sensor", "foundation_stereo"}:
+        raise ValueError("perception.depth_source must be 'sensor' or 'foundation_stereo'")
+    provider = cfg.perception.get("grasp_provider", "m2t2")
+    if provider == "m2t2":
+        health_checks = [m2t2_check_health_status(session, cfg.perception.m2t2.url)]
+    elif provider == "known_db":
+
+        async def check_pose():
+            url = cfg.perception.get("foundation_pose_url", "http://127.0.0.1:13346")
+            async with session.get(url.rstrip("/") + "/health") as response:
+                response.raise_for_status()
+
+        health_checks = [check_pose()]
+    else:
+        raise ValueError(f"Unknown grasp provider: {provider}")
+    if depth_source == "foundation_stereo":
+        health_checks.append(fs_check_health_status(session, cfg.perception.foundation_stereo.url))
     if cfg.perception.recgen.enabled:
         health_checks.append(recgen_check_health_status(session, cfg.perception.recgen.url))
     await asyncio.gather(*health_checks)
@@ -315,6 +345,8 @@ def process_scene_geometry(
     bboxes: list,
     grasps: dict,
     recgen_meshes: dict[str, trimesh.Trimesh] | None = None,
+    *,
+    registered_grasps: dict | None = None,
 ) -> ProcessedScene:
     """Process perception results into 3D scene geometry for TAMP.
 
@@ -376,6 +408,24 @@ def process_scene_geometry(
 
     if not object_pcds:
         raise ValueError("No objects with sufficient point cloud data; cannot associate grasps.")
+
+    if registered_grasps is not None:
+        # DB output already contains model TCP poses in the world frame. Applying
+        # the Panda/M2T2 correction below would corrupt those transforms.
+        object_meshes = {label: convert_trimesh_to_curobo_mesh(mesh, label) for label, mesh in object_trimeshes.items()}
+        supplied = {}
+        for label, result in registered_grasps.items():
+            if label not in object_meshes:
+                raise ValueError(f"Registered target {label} has no observed collision geometry")
+            world_from_obj = np.eye(4)
+            world_from_obj[:3, 3] = object_meshes[label].pose[:3]
+            data = result["grasps"]
+            supplied[label] = dict(
+                grasps_obj=tensor_args.to_device(np.linalg.inv(world_from_obj) @ data["world_from_tcp"]),
+                confidences_pt=tensor_args.to_device(data["scores"]),
+                registered=result,
+            )
+        return ProcessedScene(table_cuboid, object_meshes, object_pcds, supplied)
 
     # Associate grasps with objects by checking contact point proximity
     # Build a single KDTree from all object points with label tracking
@@ -510,27 +560,77 @@ async def run_perception(
     gripper_mask: Bool[np.ndarray, "h w"] | None = None,
     include_workspace: bool = True,
     log_to_rerun: bool = True,
+    *,
+    grasp_provider: str | None = None,
+    client=None,
+    active_task=None,
+    empty_place: bool = False,
 ) -> tuple[TAMPEnvironment, list, ProcessedScene, list[dict]]:
     start_time = time.perf_counter()
 
     cfg = tiptop_cfg()
     frame = observation.frame
     rgb = frame.rgb
+    provider = grasp_provider or cfg.perception.get("grasp_provider", "m2t2")
+    if provider not in {"m2t2", "known_db"}:
+        raise ValueError(f"Unknown grasp provider: {provider}")
     if log_to_rerun:
         rr.log("rgb", rr.Image(rgb))
 
-    # Run depth+grasps and detection concurrently
-    depth_results, detection_results = await asyncio.gather(
-        predict_depth_and_grasps(
-            session,
-            frame,
-            observation.world_from_cam,
-            cfg.perception.voxel_downsample_size,
-            depth_estimator=depth_estimator,
-            gripper_mask=gripper_mask,
-        ),
-        detect_and_segment(rgb, task_instruction),
+    # Share the RGB/depth/mask front end with simulation and future CAD-pose grasps.
+    results = await run_visual_perception(
+        session,
+        frame,
+        observation.world_from_cam,
+        task_instruction,
+        depth_estimator=depth_estimator,
+        gripper_mask=gripper_mask,
+        client=client,
+        active_task=active_task,
     )
+    save_dir.mkdir(parents=True, exist_ok=True)
+    (save_dir / "semantic-task.json").write_text(
+        json.dumps(
+            dict(
+                instruction=task_instruction,
+                bboxes=results["bboxes"],
+                grounded_atoms=results["grounded_atoms"],
+                semantic_source=results["semantic_source"],
+            ),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    registered_grasps = None
+    if provider == "m2t2":
+        results["grasps"] = await generate_grasps_async(
+            session,
+            cfg.perception.m2t2.url,
+            scene_xyz=results["xyz_downsampled"],
+            scene_rgb=results["rgb_downsampled"],
+            apply_bounds=cfg.perception.m2t2.apply_bounds,
+        )
+    elif provider == "known_db":
+        from tiptop.perception.known_objects import estimate_registered_grasps, registered_target
+
+        label, entry = registered_target(results["bboxes"], results["grounded_atoms"])
+        registered_grasps = {
+            label: await estimate_registered_grasps(
+                session,
+                frame,
+                results,
+                observation.world_from_cam,
+                entry=entry,
+                label=label,
+                server_url=cfg.perception.get("foundation_pose_url", "http://127.0.0.1:13346"),
+                world_from_planner_object=np.eye(4),
+                grasp_from_tcp=np.eye(4),
+            )
+        }
+        results["grasps"] = {}
+    else:
+        raise ValueError(f"Unknown grasp provider: {provider}")
     _log.info(f"Capturing observation and running perception APIs took {time.perf_counter() - start_time:.2f}s")
 
     # Save results (ProcessPoolExecutor for live mode, default thread pool for h5 mode)
@@ -540,11 +640,11 @@ async def run_perception(
         save_perception_outputs,
         rgb,
         frame.intrinsics,
-        depth_results["depth_map"],
-        depth_results["xyz_map"],
-        depth_results["rgb_map"],
-        detection_results["bboxes"],
-        detection_results["masks"],
+        results["depth_map"],
+        results["xyz_map"],
+        results["rgb_map"],
+        results["bboxes"],
+        results["masks"],
         save_dir,
         gripper_mask,
     )
@@ -552,9 +652,7 @@ async def run_perception(
     if log_to_rerun:
         rr.log(
             "pcd",
-            rr.Points3D(
-                positions=depth_results["xyz_map"].reshape(-1, 3), colors=depth_results["rgb_map"].reshape(-1, 3)
-            ),
+            rr.Points3D(positions=results["xyz_map"].reshape(-1, 3), colors=results["rgb_map"].reshape(-1, 3)),
         )
 
     # Reconstruct objects with RecGen (when enabled).
@@ -564,9 +662,9 @@ async def run_perception(
             session,
             cfg.perception.recgen.url,
             rgb_cam=rgb,
-            depth_cam=depth_results["depth_map"],
-            masks=detection_results["masks"],
-            bboxes=detection_results["bboxes"],
+            depth_cam=results["depth_map"],
+            masks=results["masks"],
+            bboxes=results["bboxes"],
             intrinsics=frame.intrinsics,
             world_from_cam=observation.world_from_cam,
             target_faces=cfg.perception.recgen.target_faces,
@@ -577,14 +675,56 @@ async def run_perception(
     proc_st = time.perf_counter()
     process_coroutine = asyncio.to_thread(
         process_scene_geometry,
-        depth_results["xyz_map"],
-        depth_results["rgb_map"],
-        detection_results["masks"],
-        detection_results["bboxes"],
-        depth_results["grasps"],
+        results["xyz_map"],
+        results["rgb_map"],
+        results["masks"],
+        results["bboxes"],
+        results["grasps"],
         recgen_meshes=recgen_meshes,
+        registered_grasps=registered_grasps,
     )
     processed_scene, save_result = await asyncio.gather(process_coroutine, save_future)
+    processed_scene.perception_results = results
+
+    if empty_place:
+        if provider != "known_db":
+            raise ValueError("Observed empty-place mode currently requires a known CAD footprint")
+        from tiptop.perception.known_objects import registered_target
+        from tiptop.perception.placement import select_observed_free_region
+
+        label, entry = registered_target(results["bboxes"], results["grounded_atoms"])
+        if results["grounded_atoms"] != [{"predicate": "on", "args": [label, "table"]}]:
+            raise ValueError("Empty-place mode requires exactly one on(target, table) goal")
+        estimate = processed_scene.grasps[label]["registered"]["pose"]["world_from_cad"]
+        vertices = trimesh.load(entry["cad"], force="mesh", process=False).vertices * entry["cad_scale_to_m"]
+        vertices = vertices @ estimate[:3, :3].T + estimate[:3, 3]
+        center = (vertices.min(0) + vertices.max(0)) / 2
+        footprint = float(np.linalg.norm(vertices[:, :2] - center[:2], axis=1).max())
+        region = select_observed_free_region(
+            results["xyz_map"],
+            table_bounds=(
+                np.asarray(processed_scene.table_cuboid.pose[:3])
+                + np.array([-0.5, 0.5])[:, None] * np.asarray(processed_scene.table_cuboid.dims)
+            ),
+            target_center=center,
+            footprint_radius=footprint,
+        )
+        # Mask segmentation crops off some bottom points. Compensate that crop
+        # using the camera-estimated CAD bottom, not a simulator ground truth pose.
+        target_mesh = processed_scene.object_meshes[label]
+        partial_bottom = float(np.asarray(target_mesh.vertices)[:, 2].min() + target_mesh.pose[2])
+        crop = max(0.0, partial_bottom - float(vertices[:, 2].min()))
+        top = region["support_z_m"] + crop + 0.003
+        surface = Cuboid(
+            name="observed_empty_region",
+            dims=[region["size_m"], region["size_m"], 0.004],
+            pose=[*region["center_xy_m"], top - 0.002, 1, 0, 0, 0],
+        )
+        region.update(partial_bottom_correction_m=crop, release_clearance_m=0.003, planning_surface_top_z_m=top)
+        results["empty_region"] = region
+        processed_scene.object_meshes[surface.name] = surface
+        results["grounded_atoms"] = [{"predicate": "on", "args": [label, surface.name]}]
+        (save_dir / "empty-region.json").write_text(json.dumps(region, indent=2) + "\n")
 
     if log_to_rerun:
         bbox_viz, masks_viz = save_result
@@ -594,12 +734,12 @@ async def run_perception(
     env, all_surfaces = create_tamp_environment(
         processed_scene.object_meshes,
         processed_scene.table_cuboid,
-        detection_results["grounded_atoms"],
+        results["grounded_atoms"],
         include_workspace,
     )
     _log.info(f"Processing scene and perception results took {time.perf_counter() - proc_st:.2f}s")
     _log.info(f"Perception pipeline completed, took {time.perf_counter() - start_time:.2f}s")
-    return env, all_surfaces, processed_scene, detection_results["grounded_atoms"]
+    return env, all_surfaces, processed_scene, results["grounded_atoms"]
 
 
 async def async_entrypoint(container: _DemoContainer, config: TAMPConfiguration, output_dir: str, execute_plan: bool):
@@ -615,8 +755,9 @@ async def async_entrypoint(container: _DemoContainer, config: TAMPConfiguration,
                 await check_server_health(session)
 
                 # Go to capture pose and ask user for instruction
-                _log.debug("Moving robot to capture joint positions")
-                go_to_capture(time_dilation_factor=cfg.robot.time_dilation_factor, motion_gen=container.motion_gen)
+                if container.camera_mount == "wrist":
+                    _log.debug("Moving robot to capture joint positions")
+                    go_to_capture(time_dilation_factor=cfg.robot.time_dilation_factor, motion_gen=container.motion_gen)
                 container.robot.open_gripper()  # ensure gripper is open
                 task_instruction = _get_task_instruction()  # Let UserExitException propagate
                 _log.info(f"User entered instruction: {task_instruction}")
