@@ -6,6 +6,7 @@
 tiptop
 ├─ curobo/
 ├─ cutamp/
+├─ FoundationPose/
 ├─ FoundationStereo/
 ├─ M2T2/
 ├─ ros2_ws/
@@ -119,6 +120,54 @@ cd ros2_ws
 [ROS2 워크스페이스 설치 및 실행 안내](ros2_ws/README_CUSTOM.md#5-development-environment-setup)를 따릅니다.
 ROS2 개발 환경은 Docker로 구성하며, 위의 Pixi 설치와 별도로 진행합니다.
 
+### 6. FoundationPose 설치
+
+FoundationPose는 Pixi와 별도의 conda 환경(`foundationpose`)에서 실행합니다.
+
+```bash
+# Clone the repository
+cd "$TIPTOP_DIR"
+git clone -b dasol git@github.com:uonrobotics/FoundationPose.git
+cd FoundationPose
+
+conda env create -f environment.yml
+conda activate foundationpose
+
+# PyTorch 설치 (CUDA 12.4, 버전 고정)
+python -m pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+
+# CUDA 툴킷 설치. label 채널로 버전을 고정해야 하위 패키지도 고정됨
+conda install -y -c nvidia/label/cuda-12.4.0 cuda-toolkit
+
+# gcc/g++ 13.4.0으로 다운그레이드 (CUDA 12.4 nvcc는 gcc 13까지만 지원)
+conda install -y -c conda-forge "gcc=13.4.0" "gxx=13.4.0"
+
+# PyTorch3D / NVDiffRast 소스 빌드 (커밋 고정)
+python -m pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git@2bce7110d5621ef2a349a72ac3aacbfba8bfb461"
+python -m pip install --no-build-isolation "git+https://github.com/NVlabs/nvdiffrast.git@253ac4fcea7de5f396371124af597e6cc957bfae"
+
+# 나머지 의존성 설치 + mycpp 빌드
+python -m pip install -r requirements.txt
+bash build_all_conda.sh
+```
+
+모델 가중치는 [FoundationPose 공식 폴더](https://drive.google.com/drive/folders/1DFezOAD0oD1BblsXVxqDsl8fj0qzB82i?usp=sharing)에서
+받아 `FoundationPose/weights/`에 둡니다 (`2023-10-28-18-33-37`, `2024-01-11-20-02-45`).
+물체의 CAD는 `data/<물체>/3d_model/edited/<물체>.obj`(+ `.mtl`, 텍스처), 파지 DB는
+`data/<물체>/UON_3finger_gripper/<물체>_merged_grasp_zero_pose.json`에 둡니다 (`data/`는 git에 포함되지 않습니다).
+
+```bash
+cd "$TIPTOP_DIR"
+
+# 서버 실행 (포트 13346, GPU 사용). `FOUNDATIONPOSE_READY port=13346`가 출력되면 준비된 것입니다
+bash scripts/run_foundation_pose_server.sh
+```
+
+참고 문서:
+- [`FoundationPose/readme_custom.md`](FoundationPose/readme_custom.md): `dasol` 브랜치에 추가된 실행기와 사용법
+- [`FoundationPose/readme.md`](FoundationPose/readme.md): 원본 안내 (가중치 "Data prepare", 문제 해결)
+- [data_gen](https://github.com/uonrobotics/data_gen) README의 "Create FoundationPose Inference Environment": 위 conda 환경 절차의 출처
+
 ---
 
 ## Installation Verification
@@ -166,6 +215,15 @@ cd "$TIPTOP_DIR/FoundationStereo"
 # q로 윈도우 끄기
 # Ctrl+ B 키를 누른 다음 D를 눌러 세션에서 연결을 해제
 pixi run demo
+```
+
+### 4. FoundationPose
+
+```bash
+cd "$TIPTOP_DIR"
+
+# 환경, 가중치, CAD를 점검합니다 (GPU 사용 안 함). 마지막 줄이 `FoundationPose check: OK`이면 성공
+bash scripts/run_foundation_pose_server.sh --check
 ```
 
 ---

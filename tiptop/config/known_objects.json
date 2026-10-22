@@ -1,0 +1,25 @@
+{
+  "objects": [
+    {
+      "class_id": "black_pepper_shaker",
+      "aliases": ["후추통", "후추병", "pepper shaker", "pepper"],
+      "cad": "data/black_pepper_shaker/3d_model/edited/black_pepper_shaker.obj",
+      "cad_scale_to_m": 0.001,
+      "db": "data/black_pepper_shaker/UON_3finger_gripper/black_pepper_shaker_merged_grasp_zero_pose.json"
+    },
+    {
+      "class_id": "disney_mickey_handled_dipper",
+      "aliases": ["미키바가지", "미키 바가지", "바가지", "mickey dipper"],
+      "cad": "data/disney_mickey_handled_dipper/3d_model/edited/disney_mickey_handled_dipper.obj",
+      "cad_scale_to_m": 0.001,
+      "db": "data/disney_mickey_handled_dipper/UON_3finger_gripper/disney_mickey_handled_dipper_merged_grasp_zero_pose.json"
+    },
+    {
+      "class_id": "car_leather_conditioner_bottle",
+      "aliases": ["가죽 로션 병", "가죽 관리제 병", "로션 병", "로션병", "로션", "lotion bottle"],
+      "cad": "data/car_leather_conditioner_bottle/3d_model/edited/car_leather_conditioner_bottle.obj",
+      "cad_scale_to_m": 0.001,
+      "db": "data/car_leather_conditioner_bottle/UON_3finger_gripper/car_leather_conditioner_bottle_merged_grasp_zero_pose.json"
+    }
+  ]
+}
