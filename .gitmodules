@@ -1,3 +1,7 @@
 [submodule "ros2_ws"]
 	path = ros2_ws
 	url = https://github.com/uon-dasol/uon_autopicking_ros2.git
+[submodule "FoundationPose"]
+	path = FoundationPose
+	url = git@github.com:uonrobotics/FoundationPose.git
+	branch = dasol
