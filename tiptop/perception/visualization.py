@@ -1,8 +1,10 @@
 import cv2
 import numpy as np
-from PIL import Image
 import supervision as sv
-from matplotlib import pyplot as plt, patches
+from matplotlib import colormaps, patches
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
+from PIL import Image
 
 
 def match_masks_to_bboxes(masks, bboxes, img_width, img_height):
@@ -90,15 +92,24 @@ def visualize_detections(
     # Convert PIL image to numpy array for matplotlib
     img_array = np.array(image)
 
-    # Create figure and axis
-    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+    # Recording runs in a worker thread. pyplot may select Qt and create a GUI
+    # there even when show_plot=False, crashing at interpreter shutdown.
+    # Build an unmanaged Agg canvas for image-only rendering instead.
+    if show_plot:
+        from matplotlib import pyplot as plt
+
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+    else:
+        fig = Figure(figsize=(12, 8))
+        FigureCanvasAgg(fig)
+        ax = fig.subplots()
     ax.imshow(img_array)
 
     # Get image dimensions for coordinate conversion
     img_height, img_width = img_array.shape[:2]
 
     # Generate colors for different objects (using a more vibrant colormap)
-    colors = plt.cm.tab20(np.linspace(0, 1, len(results)))
+    colors = colormaps["tab20"](np.linspace(0, 1, len(results)))
 
     for i, item in enumerate(results):
         box = item.get("box_2d", [])
@@ -134,7 +145,7 @@ def visualize_detections(
 
     ax.axis("off")  # Hide axes
 
-    plt.tight_layout()
+    fig.tight_layout()
 
     # Save if output path provided
     # Use matplotlib's buffer to get the rendered image, then save with cv2 (much faster)
@@ -150,7 +161,7 @@ def visualize_detections(
     if show_plot:
         plt.show()
 
-    return buf[..., :3]
+    return buf[..., :3].copy()
 
 
 def visualize_masks(rgb_pil: Image.Image, masks: np.ndarray, bboxes: list[dict]) -> np.ndarray:
