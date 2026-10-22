@@ -218,6 +218,32 @@ pixi run python -m experiments --work-dir tiptop_outputs/experiments/new-study-r
 이미 `check.json`이 있는 실행은 건너뛴다. 각 `check.json`의 성공 여부와 로그의 `exit_code`, `error`를 확인한다.
 들기만 준비한 목록은 들기까지만 실행하며, 전체 집기·놓기는 놓기 경로까지 포함된 계획이 필요하다.
 
+## 저장된 진단 자료
+
+아래 자료는 문제 원인을 비교할 때 사용하는 입력·결과다. 모두 프로젝트 내부에 있지만 **Git에는 포함되지 않는다.**
+다른 PC로 옮길 때는 코드와 별도로 보존한다. 각 폴더의 `migration.json`에는 원본 위치, 파일 크기와 SHA-256이 있다.
+
+| 경로 (`tiptop_outputs/experiments/` 기준) | 용도와 주요 파일 |
+|---|---|
+| `diagnostics/camera-20261021/` | `asset-frame-check.json`: 3종 OBJ·USD의 축척·회전 정합. `depth-check.json`: 가상 양안 영상의 FoundationStereo 깊이 평가. `current-plan-selfmask/target-collision-comparison.json`: 목표 hull 포함 여부에 따른 IK 비교 |
+| `grasping/20261020/supplement/` | `candidate-quality.json`, `candidate-coverage.json`: 후보·배치별 상세 집계. `original-experiment-sources.tar.gz`: 입력 준비·분석·일괄 실행 등에 사용한 원본 코드 51개 |
+| `diagnostics/client-exit-20261022/` | 영상 저장 후 종료 충돌의 최소 재현 코드. 수정 결과는 `tiptop_outputs/m1013/isaac/prompt-pick-place-20261022/client-shutdown/`, 현재 회귀 검사는 `tests/test_perception_visualization.py` |
+| `diagnostics/websocket-20261022/` | RGB+계산된 깊이 입력으로 복구한 websocket의 CPU 입력 검사 결과와 원본 검사 코드 |
+
+카메라 자료의 `request.npz`·`foundation-depth.npz`는 깊이 평가용 촬영에 해당한다.
+`live-runtime/planning-input/`은 별도의 후속 관측이며, 계획 자료와의 연결은 `observation_id`로 확인한다.
+`evaluation-only.npz`의 Isaac 정답 깊이는 평가용이다. 실제 입력으로 사용하지 않는다.
+장착안은 임시 형상 비교이며 실물 보정을 뜻하지 않고, 목표 hull을 끈 IK 비교도 실제 실행에서 충돌 검사를 끄라는 의미가 아니다.
+
+`original-*.tar.gz`는 원본 조사 코드를 확인하기 위한 압축본이다. 제거된 함수나 옛 경로가 들어 있을 수 있으므로
+그대로 실행하지 않는다. 평소에는 이 가이드의 유지보수되는 명령을 사용한다.
+
+```bash
+# 진단 결과 확인: 장치·서버·Gemini를 사용하지 않는다.
+python3 -m json.tool tiptop_outputs/experiments/diagnostics/camera-20261021/asset-frame-check.json
+tar -tzf tiptop_outputs/experiments/grasping/20261020/supplement/original-experiment-sources.tar.gz
+```
+
 ## 검증 범위
 
 - 물리 재현과 일괄 실행은 Isaac을 사용한다. 인식 진단은 GPU와 준비된 추론 서버를 사용한다.
