@@ -125,9 +125,9 @@ ROS2 개발 환경은 Docker로 구성하며, 위의 Pixi 설치와 별도로 �
 FoundationPose는 Pixi와 별도의 conda 환경(`foundationpose`)에서 실행합니다.
 
 ```bash
-# Clone the repository
+# FoundationPose는 서브모듈(dasol 브랜치)입니다. 5단계에서 이미 받았다면 건너뛰어도 됩니다
 cd "$TIPTOP_DIR"
-git clone -b dasol git@github.com:uonrobotics/FoundationPose.git
+git submodule update --init FoundationPose
 cd FoundationPose
 
 conda env create -f environment.yml
@@ -164,6 +164,7 @@ bash scripts/run_foundation_pose_server.sh
 ```
 
 참고 문서:
+- [`FoundationPose/tiptop_server/server.py`](FoundationPose/tiptop_server/server.py): 위 스크립트가 띄우는 서버 (M2T2, FoundationStereo처럼 서버 코드는 해당 저장소에 있음)
 - [`FoundationPose/readme_custom.md`](FoundationPose/readme_custom.md): `dasol` 브랜치에 추가된 실행기와 사용법
 - [`FoundationPose/readme.md`](FoundationPose/readme.md): 원본 안내 (가중치 "Data prepare", 문제 해결)
 - [data_gen](https://github.com/uonrobotics/data_gen) README의 "Create FoundationPose Inference Environment": 위 conda 환경 절차의 출처
