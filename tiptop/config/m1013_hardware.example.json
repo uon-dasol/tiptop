@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "calibrated": false,
+  "length_units": "metres",
+  "joint_units": "radians",
+  "camera_calibration": "m1013_hand_eye.example.json",
+  "tool": {
+    "calibrated": false,
+    "gripper_geometry_matches_reference": false,
+    "link_6_from_gripper_body": null,
+    "gripper_body_from_tcp": null,
+    "db_grasp_from_tcp": null
+  },
+  "camera_profile": {
+    "model_name": "orbbec_gemini_336l_measured_body",
+    "parent_link": "link_6",
+    "parent_from_rig": null,
+    "body_dims_m": [0.124, 0.029, 0.0277],
+    "bracket_dims_m": null,
+    "rig_from_bracket_xyz_m": null,
+    "collision_margin_m": 0.002,
+    "mount_calibrated": false
+  },
+  "workspace": {
+    "calibrated": false,
+    "fixed_obstacles": [
+      {"name": "full_table", "dims_m": null, "base_from_obstacle": null}
+    ]
+  },
+  "note": "No physical transforms are supplied. Fill measured mount, TCP/DB alignment, colour hand-eye, camera bracket and full workspace geometry. Do not enable by changing flags alone."
+}

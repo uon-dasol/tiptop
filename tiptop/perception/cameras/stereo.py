@@ -35,6 +35,41 @@ def decode_camera_request(request, *, depth_trunc_m):
         rgb=rgb,
         intrinsics=k,
     )
+    if "ir_left" in request and "depth" not in request:
+        from tiptop.perception.cameras.geometry import _rigid_transform
+        from tiptop.perception.cameras.orbbec_camera import OrbbecFrame, OrbbecIntrinsics, orbbec_infer_depth_async
+
+        left, right = np.asarray(request["ir_left"]), np.asarray(request["ir_right"])
+        ir_k = np.asarray(request["K_ir"], dtype=np.float32)
+        baseline = float(request["baseline_ir"])
+        if (
+            left.dtype != np.uint8
+            or right.dtype != np.uint8
+            or left.ndim != 2
+            or left.shape != right.shape
+            or rgb.ndim != 3
+            or rgb.shape[-1] != 3
+            or k.shape != (3, 3)
+            or ir_k.shape != (3, 3)
+            or not np.isfinite([k, ir_k]).all()
+            or min(k[0, 0], k[1, 1], ir_k[0, 0], ir_k[1, 1]) <= 0
+            or not np.isfinite(baseline)
+            or baseline <= 0
+        ):
+            raise ValueError("Invalid rectified IR observation or camera intrinsics")
+        intrinsics = OrbbecIntrinsics(
+            K_color=k,
+            K_ir=ir_k,
+            baseline_ir=baseline,
+            T_color_from_ir=_rigid_transform(request["T_color_from_ir"], "T_color_from_ir"),
+            distortion_color=np.zeros(8),
+        )  # RGB is already undistorted by the camera adapter.
+        frame = OrbbecFrame(**metadata, ir_left=left.copy(), ir_right=right.copy())
+
+        async def estimate(session, current_frame):
+            return await orbbec_infer_depth_async(session, current_frame, intrinsics)
+
+        return frame, estimate
     if "stereo_right_rgb" in request:
         right = np.asarray(request["stereo_right_rgb"], dtype=np.uint8)
         baseline = float(request["stereo_baseline_m"])

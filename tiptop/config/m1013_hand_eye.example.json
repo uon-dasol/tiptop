@@ -1,0 +1,10 @@
+{
+  "calibrated": false,
+  "consistent": false,
+  "parent_link": "link_6",
+  "world_frame": "base_link",
+  "camera_frame": "undistorted_color_optical",
+  "camera_serial": null,
+  "parent_from_camera": null,
+  "note": "Replace with a measured ChArUco hand-eye result and independently verify it after final mounting. Do not copy the simulated camera transform."
+}
