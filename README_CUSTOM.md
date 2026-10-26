@@ -9,11 +9,9 @@ tiptop
 ├─ FoundationPose/
 ├─ FoundationStereo/
 ├─ M2T2/
+├─ SAM3/
 ├─ ros2_ws/
 |  └─ README_CUSTOM.md
-├─ third_party/
-|  ├─ ik_solver/
-|  ├─ Uon-3-Finger-Gripper/
 ├─ .gitignore
 ├─ .gitmodules
 ├─ LICENSE
@@ -153,8 +151,11 @@ bash build_all_conda.sh
 
 모델 가중치는 [FoundationPose 공식 폴더](https://drive.google.com/drive/folders/1DFezOAD0oD1BblsXVxqDsl8fj0qzB82i?usp=sharing)에서
 받아 `FoundationPose/weights/`에 둡니다 (`2023-10-28-18-33-37`, `2024-01-11-20-02-45`).
-물체의 CAD는 `data/<물체>/3d_model/edited/<물체>.obj`(+ `.mtl`, 텍스처), 파지 DB는
-`data/<물체>/UON_3finger_gripper/<물체>_merged_grasp_zero_pose.json`에 둡니다 (`data/`는 git에 포함되지 않습니다).
+물체의 CAD·파지 DB는 [`tiptop/config/known_objects.json`](tiptop/config/known_objects.json)의
+`cad_root`·`db_root` 아래에서 읽습니다. 현재 기본 경로는 아래와 같습니다.
+
+- CAD: `/media/uon/data1/3d_model/2026_real_world_test_objects/<물체>/edited/<물체>.obj` (+ `.mtl`, 텍스처)
+- 파지 DB: `/media/uon/data1/Dataset_2026/isaacsim_grasp_data_gen/<물체>/UON_3finger_gripper/<물체>_merged_grasp_zero_pose.json`
 
 ```bash
 cd "$TIPTOP_DIR"
@@ -164,10 +165,33 @@ bash scripts/run_foundation_pose_server.sh
 ```
 
 참고 문서:
+
 - [`FoundationPose/tiptop_server/server.py`](FoundationPose/tiptop_server/server.py): 위 스크립트가 띄우는 서버 (M2T2, FoundationStereo처럼 서버 코드는 해당 저장소에 있음)
 - [`FoundationPose/readme_custom.md`](FoundationPose/readme_custom.md): `dasol` 브랜치에 추가된 실행기와 사용법
 - [`FoundationPose/readme.md`](FoundationPose/readme.md): 원본 안내 (가중치 "Data prepare", 문제 해결)
 - [data_gen](https://github.com/uonrobotics/data_gen) README의 "Create FoundationPose Inference Environment": 위 conda 환경 절차의 출처
+
+### 7. SAM3 설치 (reference 인식 모드)
+
+SAM3는 별도 conda 환경을 사용합니다. Gemini ER 모드만 사용하면 생략합니다.
+
+```bash
+cd "$TIPTOP_DIR"
+git submodule update --init SAM3
+conda create -n sam3 python=3.12 -y
+conda activate sam3
+python -m pip install 'setuptools<81' numpy==1.26.4 ninja
+python -m pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu128
+python -m pip install -e './SAM3[tiptop-server]'
+python -m pip install 'git+https://github.com/ronghanghu/cc_torch.git@446e9360ed10d3c8d03925ccb5f220ccb62009de'
+```
+
+가중치·reference 준비와 빌드 조건은 [SAM3 가이드](docs/sam3-reference.md)를 따릅니다.
+준비 후 서버를 실행합니다. `SAM3_READY`가 출력되면 준비된 상태입니다.
+
+```bash
+bash scripts/run_sam3_server.sh
+```
 
 ---
 
@@ -226,6 +250,30 @@ cd "$TIPTOP_DIR"
 # 환경, 가중치, CAD를 점검합니다 (GPU 사용 안 함). 마지막 줄이 `FoundationPose check: OK`이면 성공
 bash scripts/run_foundation_pose_server.sh --check
 ```
+
+### 5. SAM3
+
+```bash
+cd "$TIPTOP_DIR"
+bash scripts/run_sam3_server.sh --check
+# 서버 실행 후 별도 터미널에서 확인
+curl --fail --silent --show-error http://127.0.0.1:13347/health
+```
+
+`SAM3 check: OK`와 health의 `status: ready`를 확인합니다.
+
+---
+
+## Perception Modes
+
+| 모드 | 인식 | Gemini 호출 |
+| --- | --- | --- |
+| `gemini_er` (기본) | Gemini ER → SAM2 | 작업당 최대1회, 허용 필요 |
+| `sam3_reference` | reference 이미지 → SAM3 | 없음 |
+
+- [가상 집기·놓기](docs/known-object-pick-place.md): 실행·연결 검사·계획 인자·결과 확인
+- [SAM3 모드](docs/sam3-reference.md): reference 설정·모드 선택 명령
+- [실물 연결 준비](docs/m1013-hardware-preparation.md): 장착·보정·작업공간·gateway 연결
 
 ---
 

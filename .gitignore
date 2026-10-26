@@ -32,3 +32,7 @@ pyzed*.whl
 
 # claude
 .claude
+
+# temp
+docs/analysis/
+scripts/analysis/
