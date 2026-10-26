@@ -1,9 +1,9 @@
 [
   {
     "class": "black_pepper_shaker",
-    "asset": "data/black_pepper_shaker/3d_model/edited/black_pepper_shaker_rigid.usd",
-    "cad": "data/black_pepper_shaker/3d_model/edited/black_pepper_shaker.obj",
-    "db_directory": "data/black_pepper_shaker/UON_3finger_gripper",
+    "asset": "/media/uon/data1/3d_model/2026_real_world_test_objects/black_pepper_shaker/edited/black_pepper_shaker_rigid.usd",
+    "cad": "/media/uon/data1/3d_model/2026_real_world_test_objects/black_pepper_shaker/edited/black_pepper_shaker.obj",
+    "db_directory": "/media/uon/data1/Dataset_2026/isaacsim_grasp_data_gen/black_pepper_shaker/UON_3finger_gripper",
     "asset_scale": [
       0.1,
       0.1,
@@ -53,9 +53,9 @@
   },
   {
     "class": "car_leather_conditioner_bottle",
-    "asset": "data/car_leather_conditioner_bottle/3d_model/edited/car_leather_conditioner_bottle_rigid.usd",
-    "cad": "data/car_leather_conditioner_bottle/3d_model/edited/car_leather_conditioner_bottle.obj",
-    "db_directory": "data/car_leather_conditioner_bottle/UON_3finger_gripper",
+    "asset": "/media/uon/data1/3d_model/2026_real_world_test_objects/car_leather_conditioner_bottle/edited/car_leather_conditioner_bottle_rigid.usd",
+    "cad": "/media/uon/data1/3d_model/2026_real_world_test_objects/car_leather_conditioner_bottle/edited/car_leather_conditioner_bottle.obj",
+    "db_directory": "/media/uon/data1/Dataset_2026/isaacsim_grasp_data_gen/car_leather_conditioner_bottle/UON_3finger_gripper",
     "asset_scale": [
       0.1,
       0.1,
@@ -105,9 +105,9 @@
   },
   {
     "class": "disney_mickey_handled_dipper",
-    "asset": "data/disney_mickey_handled_dipper/3d_model/edited/disney_mickey_handled_dipper_rigid.usd",
-    "cad": "data/disney_mickey_handled_dipper/3d_model/edited/disney_mickey_handled_dipper.obj",
-    "db_directory": "data/disney_mickey_handled_dipper/UON_3finger_gripper",
+    "asset": "/media/uon/data1/3d_model/2026_real_world_test_objects/disney_mickey_handled_dipper/edited/disney_mickey_handled_dipper_rigid.usd",
+    "cad": "/media/uon/data1/3d_model/2026_real_world_test_objects/disney_mickey_handled_dipper/edited/disney_mickey_handled_dipper.obj",
+    "db_directory": "/media/uon/data1/Dataset_2026/isaacsim_grasp_data_gen/disney_mickey_handled_dipper/UON_3finger_gripper",
     "asset_scale": [
       0.1,
       0.1,

@@ -12,11 +12,12 @@
 |---|---|
 | `tiptop_outputs/experiments/grasping/20261020/` | 기본 입력. `results.json`, `plans/`, `runs/` 등 실험 자료 |
 | `tiptop_outputs/experiments/work/` | 새 분석·계획·실행 결과의 기본 출력 위치 |
-| `data/` 및 로봇 자산 | 물리 재현·DB·충돌 검사에서 참조하는 CAD, DB, USD, URDF 등 |
+| `tiptop/config/known_objects.json`의 `cad_root`·`db_root` 및 로봇 자산 | 현재 도구가 참조하는 외부 CAD·DB·USD와 로봇 URDF 등 |
 
 **실험 자료와 CAD·DB는 Git에 포함되지 않는다.** 다른 환경에서는 사용할 명령의 입력 자료를 별도로 준비해야 한다.
 일부 계획·진단 도구는 `tiptop_outputs/m1013/tamp/diagnosis-wide/`의 `candidate-ik.json`, `initial.npz`도 참조한다.
 입력 JSON에 기록된 CAD·DB·원본 파일 경로에 접근할 수 있어야 하며, 누락 자료를 자동으로 내려받지 않는다.
+현재 물체 데이터 경로는 [실행 가이드](../docs/known-object-pick-place.md#물체-데이터)에 있다.
 
 `--data-root`는 읽을 실험 자료, `--work-dir`는 새 결과 저장 위치를 지정한다.
 두 옵션은 하위 명령 앞에 둔다. 기본값과 다른 폴더를 쓸 때의 예시는 다음과 같다.

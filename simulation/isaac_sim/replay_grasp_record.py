@@ -12,7 +12,10 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-DATA = ROOT / 'data/black_pepper_shaker/UON_3finger_gripper'
+from tiptop.object_catalog import registered_object
+
+_PEPPER = registered_object('black_pepper_shaker', check_files=False)
+DATA = _PEPPER['db'].parent
 
 
 def run(args):
@@ -46,7 +49,7 @@ def run(args):
     if args.table:
         world_object = np.eye(4)
         world_object[:3, :3] = Rotation.from_euler('x', math.pi / 2).as_matrix()
-        cad = ROOT / 'data/black_pepper_shaker/3d_model/edited/black_pepper_shaker.obj'
+        cad = _PEPPER['cad']
         vertices = np.array([[float(x) for x in line.split()[1:4]] for line in cad.read_text().splitlines()
                              if line.startswith('v ')]) * .001
         world_object[2, 3] = .4 - float((vertices @ world_object[:3, :3].T)[:, 2].min()) + .002

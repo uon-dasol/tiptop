@@ -70,8 +70,8 @@ pixi run python -m tiptop.doosan run tiptop_outputs/m1013/tamp/verified/plan.jso
 
 ## 입력과 한계
 
-- `--data`, `--cad` 생략 시 로컬 `data/black_pepper_shaker` 아래의
-  `UON_3finger_gripper`와 `3d_model/edited/black_pepper_shaker.obj`를 사용한다.
+- `--data`, `--cad` 생략 시 `tiptop/config/known_objects.json`에 등록된 후추통의
+  외부 DB 디렉터리와 CAD를 사용한다. 데이터 위치는 [실행 가이드](known-object-pick-place.md#물체-데이터)를 참고한다.
 - CAD는 0.001m 축척으로 읽고 convex hull을 메모리에서 만든다.
   물체 위치 기본값은 `[0.55, -0.12, 0.5]`m, 회전 기본값은 단위 회전이다.
   `--object-rpy rx ry rz`로 월드 기준 XYZ Euler 회전(rad)을 지정할 수 있다.

@@ -7,11 +7,11 @@ import json
 import numpy as np
 import pytest
 
+from simulation.isaac_sim.observation_server import require_current_result
 from tiptop.doosan.grasp_database import load_database_grasps
 from tiptop.perception.cameras.frame import Frame
 from tiptop.perception.foundation_pose import estimate_pose
 from tiptop.perception.known_objects import estimate_registered_grasps
-from simulation.isaac_sim.observation_server import require_current_result
 
 
 def make_db(tmp_path):
@@ -94,6 +94,8 @@ class PoseSession:
 
 
 def test_current_rgb_mask_depth_pose_and_db_join_without_ground_truth(tmp_path):
+    import trimesh
+
     frame = Frame("current-camera", 12.0, np.full((4, 4, 3), 17, np.uint8), np.diag([100.0, 100.0, 1.0]))
     depth = np.full((4, 4), 0.6, np.float32)
     depth[0, 0] = np.nan
@@ -103,6 +105,9 @@ def test_current_rgb_mask_depth_pose_and_db_join_without_ground_truth(tmp_path):
     entry = dict(
         class_id="pepper", aliases=["pepper"], cad=tmp_path / "mesh.obj", cad_scale_to_m=0.001, db=make_db(tmp_path)
     )
+    mesh = trimesh.creation.box(extents=[18, 18, 1])
+    mesh.apply_translation([-11, 39, 0])
+    mesh.export(entry["cad"])
     session = PoseSession()
     result = asyncio.run(
         estimate_registered_grasps(
@@ -124,6 +129,40 @@ def test_current_rgb_mask_depth_pose_and_db_join_without_ground_truth(tmp_path):
     np.testing.assert_allclose(result["pose"]["world_from_cad"][:3, 3], [0.32, 0.07, 0.8])
     assert len(result["grasps"]["candidate_indices"]) == 2
     assert not result["grasps"]["physical_grasp_verified"]
+    visual["bboxes"][0]["box_2d"] = [838, 281, 1000, 492]
+    with pytest.raises(ValueError, match="image boundary"):
+        asyncio.run(
+            estimate_registered_grasps(
+                session,
+                frame,
+                visual,
+                world_cam,
+                entry=entry,
+                label="pepper",
+                server_url="http://local-model",
+                world_from_planner_object=np.eye(4),
+                grasp_from_tcp=np.eye(4),
+            )
+        )
+    assert len(session.packets) == 1
+
+
+def test_pose_mask_mismatch_is_rejected_even_when_the_server_returned_a_pose():
+    import trimesh
+
+    from tiptop.perception.known_objects import validate_cad_mask_alignment
+
+    vertices = np.asarray(trimesh.creation.box(extents=[0.1, 0.2, 0.05]).vertices)
+    transform = np.eye(4)
+    transform[2, 3] = 1.0
+    k = np.array([[100.0, 0, 50], [0, 100.0, 50], [0, 0, 1]])
+    mask = np.zeros((100, 100), bool)
+    mask[40:61, 45:56] = True
+    result = validate_cad_mask_alignment(vertices, transform, k, mask)
+    assert result["convex_silhouette_iou"] > 0.9 and not result["semantic_identity_verified"]
+    # A pose-fitting server can return a transform for the wrong, larger CAD.
+    with pytest.raises(ValueError, match="target identity"):
+        validate_cad_mask_alignment(vertices * 1.4, transform, k, mask)
 
 
 def test_pose_rejects_wrong_cad_identity():

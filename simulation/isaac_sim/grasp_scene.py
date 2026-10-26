@@ -13,8 +13,11 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-DATA = ROOT / 'data/black_pepper_shaker/UON_3finger_gripper'
-OBJECT = ROOT / 'data/black_pepper_shaker/3d_model/edited/black_pepper_shaker_rigid.usd'
+from tiptop.object_catalog import registered_object
+
+_PEPPER = registered_object('black_pepper_shaker', check_files=False)
+DATA = _PEPPER['db'].parent
+OBJECT = _PEPPER['cad'].with_name('black_pepper_shaker_rigid.usd')
 OUTPUT = ROOT / 'tiptop_outputs/m1013/isaac/grasp-scene'
 
 

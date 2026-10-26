@@ -24,6 +24,7 @@ from experiments.grasping.paths import PROJECT_ROOT as ROOT
 from experiments.grasping.paths import WORK_ROOT as W
 from experiments.grasping.paths import ensure_workdirs, read_json
 from tiptop.doosan.model import m1013_uon_curobo_cfg
+from tiptop.object_catalog import registered_object
 
 ensure_workdirs()
 names = ["black_pepper_shaker", "car_leather_conditioner_bottle", "disney_mickey_handled_dipper"]
@@ -33,10 +34,10 @@ vertices = {}
 proxies = {}
 source_hashes = {}
 for name in names:
-    base = ROOT / "data" / name
-    cad = base / "3d_model/edited" / f"{name}.obj"
-    usd = base / "3d_model/edited" / f"{name}_rigid.usd"
-    db = base / "UON_3finger_gripper"
+    entry = registered_object(name)
+    cad = entry["cad"]
+    usd = cad.with_name(f"{name}_rigid.usd")
+    db = entry["db"].parent
     merged = db / f"{name}_merged_grasp_zero_pose.json"
     data = read_json(merged)
     assert data["metadata"]["coordinate_frame"] == "object_zero_pose"

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Start the FoundationPose pose server (default port 13346) from the project root:
 #   bash scripts/run_foundation_pose_server.sh [--check] [--port N] [--asset-root DIR]
-# Uses the foundationpose conda env; the server finds ./FoundationPose (README_CUSTOM.md) or ../data_gen/FoundationPose.
-# --check only reports missing prerequisites (no GPU). Override with FOUNDATIONPOSE_PYTHON and FOUNDATIONPOSE_ROOT.
+# Uses the foundationpose conda env and the server in the FoundationPose submodule (README_CUSTOM.md).
+# --check only reports missing prerequisites (no GPU). Override the interpreter with FOUNDATIONPOSE_PYTHON.
+# The default allowed CAD root comes from tiptop/config/known_objects.json (cad_root).
 
 set -eo pipefail
 

@@ -12,11 +12,15 @@ Isaac Sim 6.2는 별도로 설치한다. 아래 명령은 `~/isaac-sim/6.2.0`에
 - 경로 준비: `pixi run python`으로 TiPToP 환경을 사용한다. CUDA 사용 환경이 필요하다.
 - 시뮬레이션: `~/isaac-sim/6.2.0/python.sh --no-ros-env`로 Isaac 내장 Python을 사용한다. Pixi로 실행하지 않는다.
 - 팔 모델: `ros2_ws/src/drivers/manipulator/doosan-robot2/dsr_description2/usd/m1013.usd`.
-- 그리퍼 모델: `UON_3finger_gripper/UON_3finger_gripper.usd`.
-- 물체 모델: `data/black_pepper_shaker/3d_model/edited/black_pepper_shaker_rigid.usd`.
+- 그리퍼 모델: `ros2_ws/src/description/uon_3f_description/usd/UON_3finger_gripper.usd`.
+- 물체 모델: 카탈로그 `cad_root` 아래 `black_pepper_shaker/edited/black_pepper_shaker_rigid.usd`.
+  [물체 데이터 경로](known-object-pick-place.md#물체-데이터)를 참고한다.
 - 장착/TCP 설정: `ros2_ws/src/description/m1013_uon_3f_description/config/mount.yaml`.
 
-USD 자산은 Git 저장소에 포함하지 않으므로 별도로 배치해야 한다.
+그리퍼 USD는 `ros2_ws` 저장소에 포함되며 ROS 실행 없이 파일을 직접 읽는다.
+원본 OBJ·URDF·USD는 `/media/uon/data1/UON_3finger_gripper/`에 보관하며,
+자산을 재생성할 때 `uon_3f_description/scripts/import_assets.py --source-dir`에 지정한다.
+물체 CAD·DB는 위 카탈로그의 외부 경로에 별도로 준비한다.
 팔 USD의 `joint_6` armature는 검증 조건인 **1.0**을 사용한다. 실행기가 이 값을 설정해 주지는 않는다.
 아래 명령의 spinner 토크 상한 **5 N·m**는 생성 장면에만 적용하며 원본 USD를 변경하지 않는다.
 
@@ -44,7 +48,7 @@ GUI에서 Pause/Stop 또는 창 닫기는 실행 취소로 처리하며, 중간�
 
 - `tiptop_outputs/m1013/tamp/diagnosis-wide/candidate-ik.json`: 선별된 파지 후보와 팔 IK.
 - 같은 폴더의 `initial.npz`: 물체 충돌 구.
-- `data/black_pepper_shaker/UON_3finger_gripper/` 아래 병합 파지 DB와 `output_grasp/` 수집 기록.
+- 카탈로그 `db_root` 아래 `black_pepper_shaker/UON_3finger_gripper/`의 병합 파지 DB와 `output_grasp/` 수집 기록.
 
 후보 파일은 별도로 준비된 분석 결과다. 현재 명령은 후보 생성부터 자동 수행하지 않으므로,
 Git 저장소만 새로 복제한 환경에서는 이 입력도 확보해야 한다.

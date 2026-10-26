@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 ARM_ASSET = ROOT / 'ros2_ws/src/drivers/manipulator/doosan-robot2/dsr_description2/usd/m1013.usd'
-GRIPPER_ASSET = ROOT / 'UON_3finger_gripper/UON_3finger_gripper.usd'
+GRIPPER_ASSET = ROOT / 'ros2_ws/src/description/uon_3f_description/usd/UON_3finger_gripper.usd'
 MOUNT_CONFIG = ROOT / 'ros2_ws/src/description/m1013_uon_3f_description/config/mount.yaml'
 MODEL = ROOT / 'tiptop/doosan/assets/m1013_uon/m1013_uon.urdf'
 ARM = '/World/Arm/m1013'
