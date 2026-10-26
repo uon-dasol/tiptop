@@ -48,6 +48,10 @@ cameras:
 # == Perception services ==
 # No need to change these unless you're running them on a remote machine or changed the ports
 perception:
+  mode: "gemini_er"  # gemini_er (Gemini -> SAM2) or sam3_reference (no Gemini)
+  sam3:
+    url: "http://127.0.0.1:13347"
+    reference_scene: "Home/Uon_1F_Home/floor"
   # Optional depth_source: foundation_stereo (default) or sensor.
   # sensor uses Frame.depth, aligned to RGB and expressed in metres.
   foundation_stereo:

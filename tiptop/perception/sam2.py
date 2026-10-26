@@ -112,7 +112,7 @@ def sam2_client() -> None:
             requests.get(f"{server_url}/health", timeout=5).raise_for_status()
             _log.info("Successfully connected to SAM2 server")
         except Exception as e:
-            _log.warning(f"Failed to connect to SAM2 server: {e}")
+            raise RuntimeError(f"Failed to connect to SAM2 server: {e}") from e
     else:
         raise ValueError(f"Invalid SAM2 mode: {mode}. Must be 'local' or 'remote'")
 

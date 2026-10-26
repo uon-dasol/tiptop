@@ -17,7 +17,9 @@ from tiptop.perception.utils import depth_to_xyz, get_o3d_pcd
 _log = logging.getLogger(__name__)
 
 
-async def detect_and_segment(rgb: UInt8[np.ndarray, "h w 3"], task_instruction: str, *, client=None) -> dict:
+async def detect_and_segment(
+    rgb: UInt8[np.ndarray, "h w 3"], task_instruction: str, *, client=None, object_context=None
+) -> dict:
     """Run VLM detection and SAM2 segmentation pipeline."""
     rgb_pil = Image.fromarray(rgb)
     rgb_pil_resized = rgb_pil.resize((800, int(800 * rgb_pil.size[1] / rgb_pil.size[0])), Image.Resampling.LANCZOS)
@@ -30,7 +32,10 @@ async def detect_and_segment(rgb: UInt8[np.ndarray, "h w 3"], task_instruction: 
 
         _log.info(f"Starting Gemini object detection")
         _st = time.perf_counter()
-        _bboxes, _grounded_atoms = await detect_and_translate_async(rgb_pil_resized, task_instruction, client=client)
+        options = {} if object_context is None else dict(object_context=object_context)
+        _bboxes, _grounded_atoms = await detect_and_translate_async(
+            rgb_pil_resized, task_instruction, client=client, **options
+        )
         _dur = time.perf_counter() - _st
         _log.info(f"Gemini detection took {_dur:.2f}s ({len(_bboxes)} objects, {len(_grounded_atoms)} atoms)")
         return _bboxes, _grounded_atoms
@@ -155,19 +160,38 @@ async def run_visual_perception(
     gripper_mask=None,
     client=None,
     active_task=None,
+    object_context=None,
+    perception_mode=None,
+    sam3_url=None,
+    reference_scene=None,
 ) -> dict:
-    """One RGB/depth observation through Gemini, SAM2 and per-object point clouds.
+    """One RGB/depth observation through the selected detector and common geometry.
 
     This common front end issues no grasp requests or robot commands. Object
     points remain in the world frame; their centroid is not a CAD 6D pose.
     """
     cfg = tiptop_cfg()
-    if active_task is not None:
+    mode = perception_mode or cfg.perception.get("mode", "gemini_er")
+    if mode not in {"gemini_er", "sam3_reference"}:
+        raise ValueError(f"Unknown perception mode: {mode}")
+    if mode == "sam3_reference":
+        if client is not None or active_task is not None:
+            raise ValueError("Reference mode cannot use a Gemini client or an active-task ROI")
+        from tiptop.perception.sam3_reference import detect_reference
+
+        detection_job = detect_reference(
+            session,
+            frame.rgb,
+            task_instruction,
+            server_url=sam3_url or cfg.perception.sam3.url,
+            reference_scene=reference_scene or cfg.perception.sam3.reference_scene,
+        )
+    elif active_task is not None:
         if client is not None or active_task["instruction"] != task_instruction:
             raise ValueError("Active task must match this instruction and cannot request a new VLM call")
         detection_job = segment_detections(frame.rgb, active_task["bboxes"], active_task["grounded_atoms"])
     else:
-        detection_job = detect_and_segment(frame.rgb, task_instruction, client=client)
+        detection_job = detect_and_segment(frame.rgb, task_instruction, client=client, object_context=object_context)
     depth, detection = await asyncio.gather(
         predict_scene_depth(
             session, frame, world_from_cam, cfg.perception.voxel_downsample_size, depth_estimator, gripper_mask
@@ -187,5 +211,5 @@ async def run_visual_perception(
         **depth,
         **detection,
         "objects": objects,
-        "semantic_source": "active_task_roi" if active_task is not None else "gemini",
+        "semantic_source": detection.get("semantic_source", "active_task_roi" if active_task is not None else "gemini"),
     }

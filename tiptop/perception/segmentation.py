@@ -119,6 +119,7 @@ def segment_table_with_ransac(
     valid_mask: np.ndarray = None,
     max_planes: int = 5,
     contact_threshold: float = 0.03,
+    support_points_world: np.ndarray | None = None,
 ) -> trimesh.primitives.Box:
     """Segment the table by finding the plane that the most detected objects rest on.
 
@@ -134,6 +135,8 @@ def segment_table_with_ransac(
         max_planes: Maximum number of RANSAC iterations to run.
         contact_threshold: Distance (metres) within which an object contact point
                            is considered to lie on a candidate plane.
+        support_points_world: Optional full-CAD support estimates in the world
+                              frame, replacing visible-mask bottom estimates.
 
     Returns:
         table_box: trimesh.primitives.Box representing the table.
@@ -142,7 +145,12 @@ def segment_table_with_ransac(
         raise ValueError(f"Expected structured (H, W, 3) point cloud, got shape {xyz_world.shape}")
 
     # Estimate where each object contacts its supporting surface
-    contact_pts = _object_contact_points(xyz_world, masks)
+    if support_points_world is None:
+        contact_pts = _object_contact_points(xyz_world, masks)
+    else:
+        contact_pts = np.asarray(support_points_world, float)
+        if contact_pts.ndim != 2 or contact_pts.shape[1] != 3 or not np.isfinite(contact_pts).all():
+            raise ValueError("Table support points must be finite world-frame Nx3 coordinates")
     if len(contact_pts) == 0:
         raise RuntimeError("No object contact points found — ensure objects are detected before calling this function.")
     _log.debug(f"Object contact points (world frame):\n{contact_pts}")

@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -88,17 +89,26 @@ def run_planning(
     motion_gen: MotionGen,
     all_surfaces: list,
     experiment_dir: Path | None = None,
+    *,
+    placement_support_tolerance: float = 1e-2,
+    placement_xy_tolerance: float = 1e-2,
 ) -> tuple[list | None, float, str | None]:
     """Run cuTAMP planning and return (plan, planning_time_seconds, failure_reason).
 
     Returns (None, elapsed, failure_reason) if cuTAMP fails to find a plan.
     """
-    constraint_to_tol = default_constraint_to_tol.copy()
-    constraint_to_mult = default_constraint_to_mult.copy()
-    # Loosen tolerances slightly to enable finding a plan practically
+    if (
+        not np.isfinite([placement_support_tolerance, placement_xy_tolerance]).all()
+        or min(placement_support_tolerance, placement_xy_tolerance) <= 0
+    ):
+        raise ValueError("Placement tolerances must be positive finite metres")
+    # Nested dictionaries belong to upstream. Per-task settings must not leak
+    # into the next task in this process.
+    constraint_to_tol = deepcopy(default_constraint_to_tol)
+    constraint_to_mult = deepcopy(default_constraint_to_mult)
     for surface in all_surfaces:
-        constraint_to_tol[StablePlacement.type][f"{surface.name}_in_xy"] = 1e-2
-        constraint_to_tol[StablePlacement.type][f"{surface.name}_support"] = 1e-2
+        constraint_to_tol[StablePlacement.type][f"{surface.name}_in_xy"] = placement_xy_tolerance
+        constraint_to_tol[StablePlacement.type][f"{surface.name}_support"] = placement_support_tolerance
         constraint_to_mult[StablePlacement.type][f"{surface.name}_support"] = 1.0
     cost_reducer = CostReducer(constraint_to_mult)
     constraint_checker = ConstraintChecker(constraint_to_tol)

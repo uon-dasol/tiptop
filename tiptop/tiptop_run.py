@@ -58,6 +58,7 @@ from tiptop.recording import (
     save_run_outputs,
 )
 from tiptop.utils import (
+    NumpyEncoder,
     RobotClient,
     add_file_handler,
     check_cutamp_version,
@@ -168,7 +169,8 @@ def get_demo_container(
 
     # Create depth estimator once — closed over camera intrinsics
     # Cache the SAM2 client
-    sam2_client()
+    if cfg.perception.get("mode", "gemini_er") == "gemini_er":
+        sam2_client()
 
     # Warm-up IK solver and motion generator
     ik_solver, motion_gen, _ = build_curobo_solvers(num_particles, num_spheres, collision_activation_distance)
@@ -188,6 +190,10 @@ def get_demo_container(
 
 async def check_server_health(session: aiohttp.ClientSession):
     """Check the configured perception services; sensor depth needs no depth server."""
+    if tiptop_cfg().perception.get("mode", "gemini_er") == "sam3_reference":
+        from tiptop.perception.sam3_reference import check_reference_health
+
+        await check_reference_health(session, tiptop_cfg().perception.sam3.url)
     from tiptop.perception.foundation_stereo import check_health_status as fs_check_health_status
     from tiptop.perception.m2t2 import check_health_status as m2t2_check_health_status
     from tiptop.perception.recgen import check_health_status as recgen_check_health_status
@@ -362,7 +368,12 @@ def process_scene_geometry(
         ProcessedScene with table cuboid, object meshes, pcds, and filtered grasps
     """
     # Segment table with RANSAC (returns trimesh Box)
-    table_trimesh = segment_table_with_ransac(xyz_map, rgb_map, masks)
+    table_options = {}
+    if registered_grasps and all("support_point_world" in item for item in registered_grasps.values()):
+        table_options["support_points_world"] = np.stack(
+            [item["support_point_world"] for item in registered_grasps.values()]
+        )
+    table_trimesh = segment_table_with_ransac(xyz_map, rgb_map, masks, **table_options)
     table_cuboid = convert_trimesh_box_to_curobo_cuboid(table_trimesh, name="table")
     log_curobo_mesh_to_rerun("world/table", table_cuboid.get_mesh(), static_transform=True)
 
@@ -565,6 +576,10 @@ async def run_perception(
     client=None,
     active_task=None,
     empty_place: bool = False,
+    registered_grasp_from_tcp=None,
+    perception_mode=None,
+    sam3_url=None,
+    reference_scene=None,
 ) -> tuple[TAMPEnvironment, list, ProcessedScene, list[dict]]:
     start_time = time.perf_counter()
 
@@ -577,6 +592,11 @@ async def run_perception(
     if log_to_rerun:
         rr.log("rgb", rr.Image(rgb))
 
+    object_context = None
+    if provider == "known_db":
+        from tiptop.perception.known_objects import known_object_detection_context
+
+        object_context = known_object_detection_context()
     # Share the RGB/depth/mask front end with simulation and future CAD-pose grasps.
     results = await run_visual_perception(
         session,
@@ -587,6 +607,10 @@ async def run_perception(
         gripper_mask=gripper_mask,
         client=client,
         active_task=active_task,
+        object_context=object_context,
+        perception_mode=perception_mode,
+        sam3_url=sam3_url,
+        reference_scene=reference_scene,
     )
     save_dir.mkdir(parents=True, exist_ok=True)
     (save_dir / "semantic-task.json").write_text(
@@ -596,6 +620,7 @@ async def run_perception(
                 bboxes=results["bboxes"],
                 grounded_atoms=results["grounded_atoms"],
                 semantic_source=results["semantic_source"],
+                reference_diagnostics=results.get("reference_diagnostics"),
             ),
             ensure_ascii=False,
             indent=2,
@@ -625,10 +650,23 @@ async def run_perception(
                 label=label,
                 server_url=cfg.perception.get("foundation_pose_url", "http://127.0.0.1:13346"),
                 world_from_planner_object=np.eye(4),
-                grasp_from_tcp=np.eye(4),
+                grasp_from_tcp=np.eye(4) if registered_grasp_from_tcp is None else registered_grasp_from_tcp,
             )
         }
         results["grasps"] = {}
+        (save_dir / "registered-pose.json").write_text(
+            json.dumps(
+                dict(
+                    label=label,
+                    class_id=entry["class_id"],
+                    pose=registered_grasps[label]["pose"],
+                    support_point_world=registered_grasps[label]["support_point_world"],
+                ),
+                cls=NumpyEncoder,
+                indent=2,
+            )
+            + "\n"
+        )
     else:
         raise ValueError(f"Unknown grasp provider: {provider}")
     _log.info(f"Capturing observation and running perception APIs took {time.perf_counter() - start_time:.2f}s")
@@ -700,15 +738,17 @@ async def run_perception(
         vertices = vertices @ estimate[:3, :3].T + estimate[:3, 3]
         center = (vertices.min(0) + vertices.max(0)) / 2
         footprint = float(np.linalg.norm(vertices[:, :2] - center[:2], axis=1).max())
-        region = select_observed_free_region(
-            results["xyz_map"],
+        placement_options = dict(
             table_bounds=(
                 np.asarray(processed_scene.table_cuboid.pose[:3])
                 + np.array([-0.5, 0.5])[:, None] * np.asarray(processed_scene.table_cuboid.dims)
             ),
             target_center=center,
             footprint_radius=footprint,
+            footprint_size_xy=np.ptp(vertices[:, :2], axis=0),
         )
+        (save_dir / "placement-input.json").write_text(json.dumps(placement_options, cls=NumpyEncoder, indent=2) + "\n")
+        region = select_observed_free_region(results["xyz_map"], **placement_options)
         # Mask segmentation crops off some bottom points. Compensate that crop
         # using the camera-estimated CAD bottom, not a simulator ground truth pose.
         target_mesh = processed_scene.object_meshes[label]
@@ -717,7 +757,7 @@ async def run_perception(
         top = region["support_z_m"] + crop + 0.003
         surface = Cuboid(
             name="observed_empty_region",
-            dims=[region["size_m"], region["size_m"], 0.004],
+            dims=[*region["size_xy_m"], 0.004],
             pose=[*region["center_xy_m"], top - 0.002, 1, 0, 0, 0],
         )
         region.update(partial_bottom_correction_m=crop, release_clearance_m=0.003, planning_surface_top_z_m=top)

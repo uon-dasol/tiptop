@@ -3,9 +3,9 @@ import logging
 from functools import cache
 from pathlib import Path
 
-from PIL import Image
 from google import genai
 from google.genai import types
+from PIL import Image
 
 from tiptop.config import tiptop_cfg
 
@@ -63,6 +63,11 @@ def _parse_response(response_text: str) -> tuple[list, list]:
     return bboxes, grounded_atoms
 
 
+def _task_prompt(task_instruction, object_context=None):
+    prompt = load_prompt(_detect_and_translate_prompt_name()).format(task_instruction=task_instruction)
+    return prompt if object_context is None else prompt + "\n\n" + object_context
+
+
 def detect_and_translate(
     image: Image.Image,
     task_instruction: str,
@@ -70,6 +75,7 @@ def detect_and_translate(
     model_id: str = DEFAULT_GEMINI_MODEL,
     temperature: float | None = None,
     max_output_tokens: int = 2048,
+    object_context: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Detect objects and translate task in a single Gemini API call.
 
@@ -87,7 +93,7 @@ def detect_and_translate(
         - grounded_atoms: List of predicate specifications
     """
     client = client or gemini_client()
-    prompt = load_prompt(_detect_and_translate_prompt_name()).format(task_instruction=task_instruction)
+    prompt = _task_prompt(task_instruction, object_context)
     response = client.models.generate_content(
         model=model_id,
         contents=[image, prompt],
@@ -107,6 +113,7 @@ async def detect_and_translate_async(
     model_id: str = DEFAULT_GEMINI_MODEL,
     temperature: float | None = None,
     max_output_tokens: int = 2048,
+    object_context: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Asynchronously detect objects and translate task in a single Gemini API call.
 
@@ -124,7 +131,7 @@ async def detect_and_translate_async(
         - grounded_atoms: List of predicate specifications.
     """
     client = client or gemini_client()
-    prompt = load_prompt(_detect_and_translate_prompt_name()).format(task_instruction=task_instruction)
+    prompt = _task_prompt(task_instruction, object_context)
     response = await client.aio.models.generate_content(
         model=model_id,
         contents=[image, prompt],

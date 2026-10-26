@@ -5,3 +5,7 @@
 	path = FoundationPose
 	url = git@github.com:uonrobotics/FoundationPose.git
 	branch = dasol
+[submodule "SAM3"]
+	path = SAM3
+	url = git@github.com:uonrobotics/sam3.git
+	branch = dasol
