@@ -6,6 +6,15 @@ import json
 from queue import Empty, Queue
 from threading import Thread
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+
+def fixture_target_index(fixture, class_id):
+    """Resolve exactly one execution target; never fall back to the first item."""
+    matches = [i for i, entry in enumerate(fixture) if entry["class"] == class_id]
+    if len(matches) != 1:
+        raise ValueError(f"Expected one fixture instance for class_id {class_id!r}; found {len(matches)}")
+    return matches[0]
 
 
 def require_current_result(observation_id, latest_id, current_q, observed_q, *, tolerance=0.01):
@@ -26,18 +35,23 @@ def require_current_result(observation_id, latest_id, current_q, observed_q, *, 
 
 
 class ObservationServer:
-    def __init__(self, *, port=13345, result_path=None):
+    def __init__(self, *, port=13345, result_path=None, executions=None):
         self.queue = Queue()
         queue = self.queue
 
         class Handler(BaseHTTPRequestHandler):
             def dispatch(self):
-                if self.path == "/result" and result_path is not None:
+                route = urlsplit(self.path)
+                if route.path == "/result" and (result_path is not None or executions is not None):
                     # Reading a saved result needs no Kit/PhysX calls, so polling
                     # remains responsive while the main thread executes motion.
-                    path = Path(result_path)
                     try:
-                        content = path.read_bytes() if path.exists() else b'{"finished":false}'
+                        if executions is not None:
+                            observation_id = parse_qs(route.query).get("observation_id", [None])[0]
+                            content = json.dumps(executions.result(observation_id)).encode()
+                        else:
+                            path = Path(result_path)
+                            content = path.read_bytes() if path.exists() else b'{"finished":false}'
                         json.loads(content)
                     except (OSError, ValueError):
                         content = b'{"finished":false}'
@@ -53,7 +67,7 @@ class ObservationServer:
                     self.send_error(413)
                     return
                 body = self.rfile.read(size)
-                queue.put((self.path, body, future))
+                queue.put((route.path, body, future))
                 try:
                     content = future.result(timeout=30.0)
                     self.send_response(200)

@@ -62,13 +62,31 @@
     "hardware_rgb_ir_registration_modelled": false
   },
   "q_capture": [
-    -0.21495522558689117,
-    0.13953974843025208,
-    1.1753649711608887,
-    0.00041131238685920835,
-    -4.456700325012207,
-    1.355738878250122
+    -0.2624940574169159,
+    0.046241313219070435,
+    1.041542649269104,
+    0.06948293000459671,
+    -4.483311653137207,
+    1.3325142860412598
   ],
   "scope": "Previously checked provisional virtual wrist mount; not real hand-eye calibration",
-  "source": "2026-10-21 camera-aware capture IK"
+  "source": "2026-10-22 common three-object view; full fixture table and camera/self collisions checked",
+  "observation_validation": {
+    "full_fixture_table_bounds_m": [
+      [
+        0.25,
+        -0.4,
+        0.36
+      ],
+      [
+        1.05,
+        0.4,
+        0.4
+      ]
+    ],
+    "actual_capture_collision_mesh_audit": "passed",
+    "joint_neighbourhood_rad": 0.75,
+    "shared_view": true,
+    "scope": "static simulated capture posture; not real calibration or motion-sweep certification"
+  }
 }

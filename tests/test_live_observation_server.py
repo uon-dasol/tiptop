@@ -5,7 +5,23 @@ import threading
 import time
 from urllib.request import urlopen
 
-from simulation.isaac_sim.observation_server import ObservationServer
+import pytest
+
+from simulation.isaac_sim.observation_server import ObservationServer, fixture_target_index
+
+
+def test_execution_target_resolves_all_classes_and_rejects_ambiguous_instances():
+    import json
+    from pathlib import Path
+
+    fixture = json.loads(Path("simulation/isaac_sim/config/three_objects.json").read_text())
+    for index, entry in enumerate(fixture):
+        assert fixture_target_index(fixture, entry["class"]) == index
+    for unknown in [None, "unknown"]:
+        with pytest.raises(ValueError, match="found 0"):
+            fixture_target_index(fixture, unknown)
+    with pytest.raises(ValueError, match="found 2"):
+        fixture_target_index([fixture[1], fixture[1]], fixture[1]["class"])
 
 
 def test_each_http_request_captures_on_the_polling_thread():

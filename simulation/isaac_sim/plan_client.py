@@ -19,7 +19,11 @@ from tiptop_execution.trajectory import JOINT_NAMES, validate_trajectory
 
 def load_plan(path):
     """Check the entire input before starting the simulator or issuing commands."""
-    plan = json.loads(Path(path).read_text())
+    return validate_plan(json.loads(Path(path).read_text()))
+
+
+def validate_plan(plan):
+    """Validate an in-memory request before reserving an execution slot."""
     if plan.get('version') != '1.0.0' or plan.get('robot', 'm1013_uon') != 'm1013_uon':
         raise ValueError('Expected a version 1.0.0 M1013 plan')
     q = np.asarray(plan['q_init'], dtype=float)

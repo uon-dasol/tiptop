@@ -6,7 +6,7 @@ import math
 import sys
 from pathlib import Path
 
-from tiptop.doosan.client import DoosanUONClient
+from tiptop.doosan.client import DoosanUONClient, validate_plan_backend
 from tiptop.execute_plan import execute_cutamp_plan
 
 
@@ -34,13 +34,18 @@ def main():
             args.plan.parent.mkdir(parents=True, exist_ok=True)
             args.plan.write_text(json.dumps(plan, indent=2, allow_nan=False) + "\n")
             trajectories = [step for step in plan["steps"] if step["type"] == "trajectory"]
-            result = {"success": True, "plan_file": str(args.plan.resolve()),
-                      "scene": plan["scene"], "steps": len(plan["steps"]),
-                      "sequence": [step["label"] for step in plan["steps"]],
-                      "waypoints": sum(len(step["positions"]) for step in trajectories),
-                      "requested_duration_s": sum(len(step["positions"]) * step["dt"] for step in trajectories),
-                      "joint_offsets_deg": plan["joint_offsets_deg"], "returns_to_start": True,
-                      "sent_to_robot": False}
+            result = {
+                "success": True,
+                "plan_file": str(args.plan.resolve()),
+                "scene": plan["scene"],
+                "steps": len(plan["steps"]),
+                "sequence": [step["label"] for step in plan["steps"]],
+                "waypoints": sum(len(step["positions"]) for step in trajectories),
+                "requested_duration_s": sum(len(step["positions"]) * step["dt"] for step in trajectories),
+                "joint_offsets_deg": plan["joint_offsets_deg"],
+                "returns_to_start": True,
+                "sent_to_robot": False,
+            }
         except Exception as exc:
             result = {"success": False, "error": str(exc), "sent_to_robot": False}
     else:
@@ -49,23 +54,51 @@ def main():
             offset = [math.radians(v) for v in [5, -5, 5, 2.5, 2.5, -2.5]]
             middle = [a + b / 2 for a, b in zip(q, offset)]
             target = [a + b for a, b in zip(q, offset)]
-            plan = {"version": "1.0.0", "q_init": q, "steps": [
-                {"type": "gripper", "label": "open", "action": "open"},
-                {"type": "trajectory", "label": "outward", "positions": [q, middle, target],
-                 "velocities": [[0.0] * 6] * 3, "dt": 2.0},
-                {"type": "gripper", "label": "close", "action": "close"},
-                {"type": "trajectory", "label": "return", "positions": [target, middle, q],
-                 "velocities": [[0.0] * 6] * 3, "dt": 2.0},
-                {"type": "gripper", "label": "open", "action": "open"},
-            ]}
+            plan = {
+                "version": "1.0.0",
+                "robot_system": 1,
+                "q_init": q,
+                "steps": [
+                    {"type": "gripper", "label": "open", "action": "open"},
+                    {
+                        "type": "trajectory",
+                        "label": "outward",
+                        "positions": [q, middle, target],
+                        "velocities": [[0.0] * 6] * 3,
+                        "dt": 2.0,
+                    },
+                    {"type": "gripper", "label": "close", "action": "close"},
+                    {
+                        "type": "trajectory",
+                        "label": "return",
+                        "positions": [target, middle, q],
+                        "velocities": [[0.0] * 6] * 3,
+                        "dt": 2.0,
+                    },
+                    {"type": "gripper", "label": "open", "action": "open"},
+                ],
+            }
         else:
             if args.plan is None:
                 parser.error("run requires PLAN.json")
             plan = json.loads(args.plan.read_text())
         if plan.get("version") != "1.0.0":
             parser.error("Expected TiPToP plan version 1.0.0")
+        if plan.get("robot_system") == 0:
+            from tiptop.doosan.execution import execute_measured_plan
+
+            result = execute_measured_plan(plan, client)
+            print(json.dumps(result, indent=2))
+            if result.get("execution_success") is not True:
+                raise SystemExit(1)
+            return
         q_init = plan["q_init"]
-        actual = client.get_joint_positions()
+        state = client.get_state()
+        try:
+            validate_plan_backend(plan, state)
+        except (RuntimeError, ValueError, OSError, KeyError) as error:
+            parser.error(str(error))
+        actual = state["joint_positions"]
         if len(q_init) != 6 or any(not math.isfinite(v) for v in q_init):
             parser.error("q_init must contain six finite joint angles (rad)")
         if max(abs(a - b) for a, b in zip(actual, q_init)) > math.radians(1):

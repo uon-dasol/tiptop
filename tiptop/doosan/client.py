@@ -6,6 +6,30 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
+def validate_plan_backend(plan, state):
+    """Check a saved plan's actual/virtual backend before any command is sent."""
+    if not state.get("success"):
+        raise RuntimeError(state.get("error", "Robot state unavailable"))
+    if state.get("read_only"):
+        raise ValueError("The gateway is read-only; no plan can execute")
+    system = state.get("robot_system")
+    if system not in (0, 1):
+        raise ValueError("The gateway must report its actual robot_system")
+    expected = plan.get("robot_system")
+    if expected is not None and expected != system:
+        raise ValueError("Saved plan and actual robot_system differ")
+    if system == 0:
+        from tiptop.doosan.hardware import hardware_profile_fingerprint, load_hardware_profile
+
+        if expected != 0 or plan.get("robot") != "m1013_uon" or not plan.get("hardware_profile"):
+            raise ValueError("A physical run requires a plan made with measured --hardware-profile inputs")
+        if state.get("gripper", {}).get("backend") != "uon_native":
+            raise ValueError("A physical run requires the configured native UON gripper backend")
+        profile = load_hardware_profile(plan["hardware_profile"])
+        if plan.get("hardware_profile_sha256") != hardware_profile_fingerprint(profile):
+            raise ValueError("Hardware geometry or camera calibration changed after planning; acquire and plan again")
+
+
 class DoosanUONClient:
     """M1013 joint paths (rad, rad/s, seconds) and the UON model gripper.
 
@@ -25,7 +49,10 @@ class DoosanUONClient:
         except HTTPError as exc:
             return json.load(exc)
         except (URLError, TimeoutError, OSError) as exc:
-            return {"success": False, "error": f"Gateway communication failed: {exc}. Query state before another command."}
+            return {
+                "success": False,
+                "error": f"Gateway communication failed: {exc}. Query state before another command.",
+            }
 
     def get_state(self):
         return self._request("/state")
