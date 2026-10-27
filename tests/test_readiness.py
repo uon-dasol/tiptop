@@ -15,7 +15,12 @@ from tiptop.doosan.readiness import check_gateway_state, check_readiness
 
 
 @pytest.fixture
-def services():
+def services(monkeypatch):
+    # Connection checks use a synthetic target; don't resolve this PC's NAS
+    # paths while validating its instruction. Catalog parsing is tested apart.
+    monkeypatch.setattr(
+        "tiptop.perception.sam3_reference.registered_object", lambda class_id, **kwargs: dict(class_id=class_id)
+    )
     packet = dict(
         rgb=np.zeros((4, 6, 3), np.uint8),
         intrinsics=np.diag([100, 100, 1]),

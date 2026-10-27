@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'simulation/isaac_sim'))
 parser = argparse.ArgumentParser()
 parser.add_argument("--scene", type=Path, default=ROOT / "simulation/isaac_sim/config/three_objects.json")
+parser.add_argument("--asset-root", type=Path, help="Optional CAD root containing <class>/edited/<class>_rigid.usd")
 parser.add_argument("--camera-preparation", type=Path, default=ROOT / "simulation/isaac_sim/config/wrist_camera.json")
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--port", type=int, default=13345)
@@ -31,9 +32,9 @@ args.output.mkdir(parents=True, exist_ok=True)
 if any((args.output / name).exists() for name in ["execution.json", "accepted-plan.json"]):
     parser.error("This directory belongs to an earlier runtime; use a new session output directory")
 (args.output / "close").unlink(missing_ok=True)
-prepared = json.loads(args.camera_preparation.read_text())
-if not prepared["success"]:
-    raise ValueError("A collision-checked camera preparation is required")
+from tiptop.doosan.virtual_camera import load_camera_preparation, camera_preparation_id, validate_virtual_camera_plan
+
+prepared = load_camera_preparation(args.camera_preparation)
 from observation_server import ObservationServer, fixture_target_index, require_current_result
 from task_runtime import ExecutionStore, evaluate_pick_place
 
@@ -90,8 +91,23 @@ try:
         parent.AddTransformOp().Set(Gf.Matrix4d(np.asarray(row["world_from_object"]).T.tolist()))
         asset = UsdGeom.Xform.Define(stage, f"/World/Item_{index}/Asset")
         asset.AddScaleOp().Set(Gf.Vec3f(*row["asset_scale"]))
-        asset.GetPrim().GetReferences().AddReference(str(ROOT / row["asset"]))
-    camera = IsaacStereoCamera(stage, prepared["profile"], parent_path=ARM + "/link_6")
+        asset_path = (
+            args.asset_root / row["class"] / "edited" / (row["class"] + "_rigid.usd")
+            if args.asset_root is not None else ROOT / row["asset"]
+        )
+        if not asset_path.is_file():
+            raise FileNotFoundError(f"Fixture USD not found: {asset_path}; check --asset-root or --scene")
+        asset.GetPrim().GetReferences().AddReference(str(asset_path.resolve()))
+    mount = prepared["profile"]["mount"]
+    camera_parent = ARM + "/link_6" if mount == "wrist" else "/World"
+    camera = IsaacStereoCamera(stage, prepared["profile"], parent_path=camera_parent)
+    for row in prepared.get("fixed_obstacles", []):
+        box = UsdGeom.Cube.Define(stage, "/World/FixedStructures/" + row["name"])
+        box.CreateSizeAttr(1.0)
+        box.AddTransformOp().Set(Gf.Matrix4d(np.asarray(row["base_from_obstacle"], float).T.tolist()))
+        box.AddScaleOp().Set(Gf.Vec3d(*row["dims_m"]))
+        box.CreateDisplayColorAttr([Gf.Vec3f(0.25, 0.25, 0.3)])
+        UsdPhysics.CollisionAPI.Apply(box.GetPrim())
     # Evaluation sensors read physics only; no object pose enters the planner here.
     from isaacsim.core.experimental.prims import RigidPrim
     from omni.physx import get_physx_simulation_interface
@@ -217,7 +233,8 @@ try:
         global latest_id, latest_q, pending_plan, target_index, target_body, object_id, other_indices, execution_dir
         if path == "/health":
             return json.dumps(dict(success=True, pid=os.getpid(), active_observation_id=executions.active_id,
-                                   motion_stopped=client.cancelled)).encode()
+                                   motion_stopped=client.cancelled, camera_mount=mount,
+                                   camera_preparation_sha256=camera_preparation_id(prepared))).encode()
         if executions.active_id is not None:
             raise ValueError('An execution is active; wait for its result before requesting another task')
         if path == "/observe":
@@ -230,6 +247,7 @@ try:
             )
             latest_id, latest_q = uuid.uuid4().hex, request["q_init"].copy()
             request["observation_id"] = latest_id
+            request["camera_preparation"] = json.dumps(prepared)
             # Declared fixed workspace geometry, not object poses read from physics.
             # The partial observed table alone can miss a near-side arm collision.
             request["workspace_table_bounds_m"] = np.stack([table_center-table_dims/2,table_center+table_dims/2])
@@ -261,6 +279,7 @@ try:
             return b'{"success":true}'
         if path == '/execute':
             plan = json.loads(body)
+            validate_virtual_camera_plan(plan, prepared)
             selected = fixture_target_index(fixture, plan.get('class_id'))
             require_current_result(plan['observation_id'], latest_id, client.get_joint_positions(), plan['q_init'])
             validated = validate_plan(plan)
@@ -276,7 +295,7 @@ try:
         raise ValueError("Unknown live camera endpoint")
 
     (args.output / "process.json").write_text(json.dumps(dict(pid=os.getpid(), port=args.port)))
-    print(f"LIVE_CAMERA_READY pid={os.getpid()} port={args.port}", flush=True)
+    print(f"LIVE_CAMERA_READY pid={os.getpid()} port={args.port} camera_mount={mount}", flush=True)
     while app.is_running() and not (args.output / "close").exists():
         app.update()
         server.poll(dispatch)

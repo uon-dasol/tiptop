@@ -7,6 +7,7 @@ Isaac Sim에서 집기·빈자리 배치를 수행한다.
 실물 장착·보정·장치 연결 준비는 [실물 연결 준비](m1013-hardware-preparation.md)를 참고한다.
 Gemini ER/SAM2와 Gemini 없는 SAM3 reference 모드의 선택·별도 서버 설치는
 [SAM3 reference 모드](sam3-reference.md)를 참고한다. 기본 모드는 기존 `gemini_er`다.
+기존 wrist 대신 가상 상부 고정 카메라를 선택하려면 [고정 카메라 가이드](m1013-fixed-camera.md)를 따른다.
 
 ## 물체 데이터
 

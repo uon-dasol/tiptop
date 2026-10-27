@@ -111,6 +111,9 @@ async def run(args):
         else:
             if profile_path is not None:
                 raise ValueError("A hardware profile requires the physical Orbbec observation backend")
+            from tiptop.doosan.virtual_camera import resolve_camera_preparation
+
+            camera_preparation = resolve_camera_preparation(observed, getattr(args, "camera_preparation", None))
             kin = get_m1013_uon_kinematics_model()
         known_fixed = []
         if hardware is None and "workspace_table_bounds_m" in observed:
@@ -233,19 +236,20 @@ async def run(args):
         )
         with (args.output / "planning-input.pkl").open("wb") as stream:
             pickle.dump((env, cached_scene, observation), stream)
-        profile = json.loads(args.camera_preparation.read_text())["profile"] if hardware is None else None
-        model_options = (
-            dict(fixed_obstacles=known_fixed)
-            if hardware is None
-            else {key: hardware[key] for key in ["robot_config", "gripper_spheres", "fixed_obstacles"]}
-        )
+        if hardware is None:
+            from tiptop.doosan.virtual_camera import camera_planning_options
+
+            model_options = camera_planning_options(camera_preparation)
+            model_options["fixed_obstacles"] = [*known_fixed, *model_options["fixed_obstacles"]]
+        else:
+            model_options = {key: hardware[key] for key in ["robot_config", "gripper_spheres", "fixed_obstacles"]}
+            model_options["camera_profile"] = None
         args._stage = "planning"
         plan, report = await asyncio.to_thread(
             plan_known_task,
             env,
             scene,
             observation,
-            camera_profile=profile,
             output=args.output,
             max_approach_tilt_deg=args.max_approach_tilt_deg,
             planning_settings=getattr(args, "planning_settings", None),
@@ -267,6 +271,13 @@ async def run(args):
             hardware_profile_sha256=fingerprint,
             robot_system=0 if hardware is not None else 1,
         )
+        if hardware is None:
+            from tiptop.doosan.virtual_camera import camera_preparation_id
+
+            plan.update(
+                camera_mount=camera_preparation["profile"]["mount"],
+                camera_preparation_sha256=camera_preparation_id(camera_preparation),
+            )
         (args.output / "plan.json").write_text(json.dumps(plan, cls=NumpyEncoder, indent=2) + "\n")
         if not args.execute:
             print("Complete plan saved; no motion requested.")
@@ -429,7 +440,8 @@ def main():
     parser.add_argument("--sam3-url", help="Override the SAM3 reference server URL")
     parser.add_argument("--reference-scene", help="Reference scene relative to the SAM3 server reference root")
     parser.add_argument(
-        "--camera-preparation", type=Path, default=Path("simulation/isaac_sim/config/wrist_camera.json")
+        "--camera-preparation", type=Path,
+        help="Optional virtual camera config assertion; otherwise use the live backend configuration (legacy: wrist)",
     )
     parser.add_argument(
         "--output",

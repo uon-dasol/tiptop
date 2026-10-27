@@ -28,7 +28,7 @@ async def check_model_health(session, url):
     return health
 
 
-def _observation(packet, profile):
+def _observation(packet, profile, camera_preparation=None):
     from tiptop.perception.cameras.stereo import decode_camera_request
 
     rgb = np.asarray(packet["rgb"])
@@ -60,7 +60,7 @@ def _observation(packet, profile):
         or int(packet.get("robot_system", -1)) != 0
     ):
         raise ValueError("Observed camera serial, robot system or base frame differs from the measured profile")
-    return dict(
+    details = dict(
         camera_model=str(packet.get("camera_model", "unknown")),
         observation_id=str(packet["observation_id"]),
         rgb_size=[rgb.shape[1], rgb.shape[0]],
@@ -68,6 +68,12 @@ def _observation(packet, profile):
         depth_source="foundation_stereo" if estimator else "sensor",
         q_init=q.tolist(),
     )
+    if not physical:
+        from tiptop.doosan.virtual_camera import resolve_camera_preparation
+
+        preparation = resolve_camera_preparation(packet, camera_preparation)
+        details["camera_mount"] = preparation["profile"]["mount"]
+    return details
 
 
 def check_gateway_state(state, *, execute, observed_q=None):
@@ -163,7 +169,7 @@ async def check_readiness(args):
             ) as response:
                 response.raise_for_status()
                 with np.load(io.BytesIO(await response.read()), allow_pickle=False) as packet:
-                    details = _observation(packet, profile)
+                    details = _observation(packet, profile, getattr(args, "camera_preparation", None))
             return details
 
         # Capturing a new packet supersedes earlier unexecuted observation IDs.
