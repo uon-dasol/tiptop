@@ -65,6 +65,13 @@ def default_asset_root():
     return (ROOT / Path(catalog.get("cad_root", "data")).expanduser()).resolve()
 
 
+def resolve_preload_objects(class_ids):
+    from tiptop.object_catalog import sequence_objects
+
+    return [dict(class_id=item["class_id"], mesh_path=str(item["cad"]), mesh_scale=item["cad_scale_to_m"])
+            for item in sequence_objects(class_ids, catalog_path=CATALOG, check_files=False)]
+
+
 def main():
     server = FOUNDATIONPOSE_ROOT / "tiptop_server" / "server.py"
     if not server.is_file():
@@ -75,7 +82,8 @@ def main():
     sys.path.insert(0, str(FOUNDATIONPOSE_ROOT))
     from tiptop_server.server import main as serve
 
-    serve(default_asset_root=default_asset_root(), extra_findings=cad_findings)
+    serve(default_asset_root=default_asset_root(), extra_findings=cad_findings,
+          resolve_preload_objects=resolve_preload_objects)
 
 
 if __name__ == "__main__":

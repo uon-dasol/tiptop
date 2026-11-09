@@ -37,3 +37,19 @@ def registered_object(class_id, *, catalog_path=DEFAULT_CATALOG, asset_root=ROOT
         if check_files and not entry[key].is_file():
             raise FileNotFoundError(entry[key])
     return entry
+
+
+def sequence_objects(class_ids, *, catalog_path=DEFAULT_CATALOG, check_files=True):
+    """Resolve a canonical preparation list, preserving order and removing repeats."""
+    if not isinstance(class_ids, (list, tuple)) or not class_ids:
+        raise ValueError("Provide at least one canonical class_id, or all")
+    if "all" in class_ids:
+        if list(class_ids) != ["all"]:
+            raise ValueError("Use all alone, or list individual class IDs")
+        class_ids = [item["class_id"] for item in load_catalog(catalog_path)["objects"]]
+    if not class_ids:
+        raise ValueError("No registered objects to prepare")
+    if not all(isinstance(value, str) and value for value in class_ids):
+        raise ValueError("Class IDs must be nonempty strings")
+    return [registered_object(name, catalog_path=catalog_path, check_files=check_files)
+            for name in dict.fromkeys(class_ids)]

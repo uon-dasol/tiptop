@@ -183,6 +183,28 @@ def test_pose_rejects_wrong_cad_identity():
         )
 
 
+def test_pose_crop_preserves_native_pixels_and_optical_rays():
+    k = np.array([[600., 0, 400.], [0, 610., 300.], [0, 0, 1.]])
+    rgb = np.arange(600 * 800 * 3, dtype=np.uint8).reshape(600, 800, 3)
+    frame = Frame("camera", 1., rgb, k)
+    mask = np.zeros((600, 800), bool)
+    mask[250:270, 350:370] = True
+    session = PoseSession()
+    result = asyncio.run(estimate_pose(
+        session, "http://local-model", frame, np.ones((600, 800), np.float32), mask,
+        mesh_path="mesh.obj", mesh_scale=.001, class_id="pepper", world_from_cam=np.eye(4),
+    ))
+    packet = session.packets[0]
+    assert result["input_crop_xyxy"] == [250, 150, 470, 370]
+    np.testing.assert_array_equal(packet["rgb"], rgb[150:370, 250:470])
+    np.testing.assert_array_equal(packet["mask"], mask[150:370, 250:470])
+    np.testing.assert_allclose(
+        np.linalg.inv(packet["intrinsics"]) @ [360 - 250, 260 - 150, 1],
+        np.linalg.inv(k) @ [360, 260, 1],
+    )
+    np.testing.assert_allclose(k[:2, 2], [400, 300])
+
+
 @pytest.mark.parametrize("result_id,current_q", [("previous-frame", np.zeros(6)), ("current-frame", np.ones(6) * 0.02)])
 def test_live_result_rejects_wrong_frame_or_changed_robot(result_id, current_q):
     with pytest.raises(ValueError):
