@@ -65,7 +65,7 @@ def test_executor_probe_rejects_invalid_or_discontinuous_paths(positions, veloci
     assert client.calls == []
 
 
-def test_actual_client_and_gateway_validator_accept_existing_terminal_hold():
+def test_actual_client_and_gateway_validator_accept_stationary_endpoint():
     from tiptop.doosan.planning import prepare_joint_path
     from tiptop.doosan.tamp import verify_gateway_contract
     from tiptop.execute_plan import ExecutionFailure
@@ -78,7 +78,7 @@ def test_actual_client_and_gateway_validator_accept_existing_terminal_hold():
     q, v, _ = prepare_joint_path(step["positions"], step["velocities"], step["dt"])
     step.update(positions=q, velocities=v)
     calls = verify_gateway_contract(plan)
-    np.testing.assert_array_equal(q[:len(original)], original)
+    np.testing.assert_array_equal(q, original)
     assert calls == [{"type": "trajectory", "waypoints": len(q), "dof": 6}]
 
 

@@ -3,7 +3,9 @@
 import argparse
 import json
 import math
+import logging
 import sys
+import time
 from pathlib import Path
 
 from tiptop.doosan.client import DoosanUONClient, validate_plan_backend
@@ -87,7 +89,10 @@ def main():
         if plan.get("robot_system") == 0:
             from tiptop.doosan.execution import execute_measured_plan
 
-            result = execute_measured_plan(plan, client)
+            logging.basicConfig(level=logging.INFO)
+            report_path = args.plan.with_name(args.plan.stem + f".execution-{time.time_ns()}.json")
+            print(f"PHYSICAL_EXECUTION_REPORT {report_path}", file=sys.stderr, flush=True)
+            result = execute_measured_plan(plan, client, report_path=report_path)
             print(json.dumps(result, indent=2))
             if result.get("execution_success") is not True:
                 raise SystemExit(1)
@@ -103,8 +108,6 @@ def main():
             parser.error("q_init must contain six finite joint angles (rad)")
         if max(abs(a - b) for a, b in zip(actual, q_init)) > math.radians(1):
             parser.error("Plan q_init differs from current joints by more than 1 degree")
-        import logging
-
         log_format = logging.BASIC_FORMAT
         if sys.stderr.isatty():
             log_format = f"\033[93m{log_format}\033[0m"

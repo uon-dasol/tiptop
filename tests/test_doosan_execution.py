@@ -44,7 +44,7 @@ def test_saved_physical_plan_uses_same_measured_executor_as_live_cli(monkeypatch
     path.write_text(json.dumps(dict(version="1.0.0", robot_system=0)))
     calls = []
 
-    def execute(plan, client):
+    def execute(plan, client, **kwargs):
         calls.append(plan)
         return dict(success=None, execution_success=True, status="execution_completed_unverified")
 

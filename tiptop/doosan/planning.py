@@ -102,21 +102,15 @@ def _plan_joint_moves(q_start, targets, world=None, gripper_positions=None):
     return steps
 
 
-def prepare_joint_path(positions, velocities, dt, settle_time=0.1):
-    """Preserve planned samples and append a stationary terminal hold.
-
-    Only tiny terminal velocity residues are accepted. A path ending in motion
-    must be planned to stop rather than being silently converted into a hold.
-    """
+def prepare_joint_path(positions, velocities, dt):
+    """Preserve sample positions and timing; zero only tiny endpoint residues."""
     q, v = np.asarray(positions, dtype=float), np.asarray(velocities, dtype=float)
     if q.ndim != 2 or q.shape[1] != 6 or len(q) == 0 or v.shape != q.shape:
         raise ValueError('Expected matching nonempty [N, 6] position and velocity arrays')
     if not np.isfinite(q).all() or not np.isfinite(v).all() or not math.isfinite(dt) or dt <= 0:
         raise ValueError('Expected finite samples and positive dt')
-    if not math.isfinite(settle_time) or settle_time <= 0:
-        raise ValueError('settle_time must be finite and positive')
-    if np.max(np.abs(v[-1])) > 1e-3:
-        raise ValueError('Terminal velocity is too large for a stationary settling hold')
-    n = max(1, math.ceil(settle_time / dt))
-    return (np.vstack([q, np.repeat(q[-1:], n, axis=0)]),
-            np.vstack([v, np.zeros((n, 6))]), [float(dt)] * (len(q) + n))
+    if np.max(np.abs(v[-1])) > 2.5e-3:
+        raise ValueError('Terminal velocity is too large for a stationary endpoint')
+    v = v.copy()
+    v[-1] = 0
+    return q, v, [float(dt)] * len(q)

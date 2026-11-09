@@ -287,7 +287,6 @@ def check(args, output, report):
     report["stage"] = "serialize_plan"
     serialized = serialize_plan(plan, np.array(args.q_init))
     serialized.update(robot="m1013_uon", frame_calibrated=False, physical_grasp_verified=False)
-    # Reuse the existing stationary hold preparation without changing planned samples.
     for step in serialized["steps"]:
         if step["type"] == "trajectory":
             positions, velocities, _ = prepare_joint_path(step["positions"], step["velocities"], step["dt"])
@@ -300,7 +299,7 @@ def check(args, output, report):
         stage="executor_verified",
         executor_calls=gateway_calls,
         gateway_contract_verified=True,
-        terminal_hold_helper="prepare_joint_path",
+        terminal_velocity_helper="prepare_joint_path",
         steps=len(plan),
         sequence=[s["label"] for s in plan],
         plan_file=str(output / "plan.json"),

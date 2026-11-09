@@ -54,21 +54,22 @@ def _observation(packet, profile, camera_preparation=None):
     physical = str(packet.get("camera_model", "")).startswith("orbbec/")
     if physical != (profile is not None):
         raise ValueError("Physical camera and measured --hardware-profile must be used together")
-    if physical and (
-        str(packet.get("camera_serial", "")) != profile["_camera_calibration"]["camera_serial"]
-        or str(packet.get("world_frame", "")) != "base_link"
-        or int(packet.get("robot_system", -1)) != 0
-    ):
-        raise ValueError("Observed camera serial, robot system or base frame differs from the measured profile")
+    if physical:
+        from tiptop.doosan.hardware import validate_hardware_observation
+
+        validate_hardware_observation(packet, profile)
     details = dict(
         camera_model=str(packet.get("camera_model", "unknown")),
         observation_id=str(packet["observation_id"]),
         rgb_size=[rgb.shape[1], rgb.shape[0]],
         physical=physical,
-        depth_source="foundation_stereo" if estimator else "sensor",
+        depth_source="foundation_stereo" if estimator else str(packet.get("depth_source", "sensor")),
         q_init=q.tolist(),
     )
-    if not physical:
+    if physical:
+        details["camera_mount"] = "fixed" if profile["_camera_calibration"]["parent_link"] == "base_link" else "wrist"
+        details["camera_pose_source"] = profile["_camera_calibration"].get("pose_source", "measured")
+    else:
         from tiptop.doosan.virtual_camera import resolve_camera_preparation
 
         preparation = resolve_camera_preparation(packet, camera_preparation)
@@ -76,7 +77,7 @@ def _observation(packet, profile, camera_preparation=None):
     return details
 
 
-def check_gateway_state(state, *, execute, observed_q=None):
+def check_gateway_state(state, *, execute, observed_q=None, require_open=False):
     """State-only gateways suffice for planning, native feedback is needed to move."""
     q = np.asarray(state.get("joint_positions"), float)
     if (
@@ -91,12 +92,26 @@ def check_gateway_state(state, *, execute, observed_q=None):
         observed_q = np.asarray(observed_q, float)
         if observed_q.shape != (6,) or not np.isfinite(observed_q).all() or np.max(np.abs(q - observed_q)) > 0.01:
             raise ValueError("Robot changed since observation; acquire and check again")
+    gripper_open = None
     if execute:
         if state.get("read_only"):
             raise ValueError("Execution gateway is read-only")
         gripper = state.get("gripper", {})
         if gripper.get("backend") != "uon_native" or gripper.get("feedback_fresh") is not True:
-            raise ValueError("Execution requires fresh native UON gripper feedback")
+            detail = gripper.get("error")
+            raise ValueError("Execution requires fresh native UON gripper feedback" + (f": {detail}" if detail else ""))
+        try:
+            position, target, tolerance = (
+                float(gripper[key])
+                for key in ("position_counts", "open_position_counts", "position_tolerance_counts")
+            )
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Gripper opening feedback/configuration missing; rebuild and restart the updated gateway") from None
+        if not np.isfinite([position, target, tolerance]).all() or tolerance <= 0:
+            raise ValueError("Gripper opening feedback/configuration is invalid")
+        gripper_open = abs(position - target) <= tolerance
+        if require_open and not gripper_open:
+            raise ValueError("Gripper did not reach its open position; arm approach is blocked")
         if state.get("execution", {}).get("status") in {"failed", "cancelled"}:
             raise ValueError("Inspect and recover the previous gateway failure before another task")
         connections = state.get("connections", {})
@@ -110,7 +125,8 @@ def check_gateway_state(state, *, execute, observed_q=None):
             raise ValueError(
                 "Execution requires ready trajectory/stop interfaces and one native gripper driver; rebuild the gateway if connection status is missing"
             )
-    return dict(robot_system=0, idle=True, read_only=bool(state.get("read_only")), gripper=state.get("gripper"))
+    return dict(robot_system=0, idle=True, read_only=bool(state.get("read_only")),
+                gripper=state.get("gripper"), gripper_open=gripper_open)
 
 
 async def check_readiness(args):
@@ -135,8 +151,16 @@ async def check_readiness(args):
             nonlocal profile
             from tiptop.doosan.hardware import load_hardware_profile
 
-            profile = load_hardware_profile(profile_path)
-            return dict(profile=str(Path(profile_path).resolve()), measured_inputs_valid=True)
+            profile = load_hardware_profile(
+                profile_path, allow_assumed_camera=not args.execute, allow_assumed_model=not args.execute
+            )
+            pose_source = profile["_camera_calibration"].get("pose_source", "measured")
+            return dict(
+                profile=str(Path(profile_path).resolve()), inputs_valid=True,
+                camera_pose_source=pose_source,
+                measured_inputs_valid=profile.get("calibrated") is True and pose_source != "assumed",
+                planning_only=profile.get("calibrated") is not True or pose_source == "assumed",
+            )
 
         await collect("hardware_profile", hardware)
 
