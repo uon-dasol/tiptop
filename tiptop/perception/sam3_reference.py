@@ -2,12 +2,16 @@
 
 import io
 import json
+import logging
 import re
+import time
 
 import aiohttp
 import numpy as np
 
 from tiptop.object_catalog import registered_object
+
+_log = logging.getLogger(__name__)
 
 
 class ReferenceDetectionError(ValueError):
@@ -17,14 +21,14 @@ class ReferenceDetectionError(ValueError):
 
 
 def parse_reference_task(instruction):
-    """Only the explicit canonical-class pick-and-empty-place command is supported."""
+    """Resolve an explicit canonical-class pick-and-return command."""
     match = re.fullmatch(
-        r"\s*`?([a-z][a-z0-9_]*)`?\s*(?:을|를)?\s*집(?:고|어서)\s*"
-        r"빈\s*곳에\s*놓(?:아\s*줘|아주세요|아|기)\s*[.!]?\s*",
+        r"\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s*(?:을|를)?\s*집(?:고|어서)\s*"
+        r"(?:들어\s*올렸다가\s*)?제\s*자리(?:에|로)\s*놓(?:아\s*줘|아주세요|아|기)\s*[.!]?\s*",
         instruction,
     )
     if match is None:
-        raise ValueError("Reference mode requires: <canonical_class_id>를 집고 빈곳에 놓아")
+        raise ValueError("Reference mode requires: <canonical_class_id>를 집고 제자리에 놓아")
     class_id = match.group(1)
     registered_object(class_id, check_files=False)
     return class_id
@@ -67,9 +71,12 @@ def decode_reference_result(packet, rgb_shape, class_id):
 
 
 async def detect_reference(session, rgb, instruction, *, server_url, reference_scene):
+    started = time.perf_counter()
     class_id = parse_reference_task(instruction)
     stream = io.BytesIO()
-    np.savez_compressed(stream, rgb=rgb, class_id=class_id, reference_scene=reference_scene)
+    from tiptop.serialization import savez_fast
+
+    savez_fast(stream, rgb=rgb, class_id=class_id, reference_scene=reference_scene)
     async with session.post(
         server_url.rstrip("/") + "/segment-reference",
         data=stream.getvalue(),
@@ -78,7 +85,9 @@ async def detect_reference(session, rgb, instruction, *, server_url, reference_s
         if response.status != 200:
             raise RuntimeError(f"SAM3 request failed ({response.status}): {(await response.text())[:1000]}")
         with np.load(io.BytesIO(await response.read()), allow_pickle=False) as packet:
-            return decode_reference_result(packet, rgb.shape, class_id)
+            result = decode_reference_result(packet, rgb.shape, class_id)
+    _log.info("Reference detection client total took %.2fs", time.perf_counter() - started)
+    return result
 
 
 async def check_reference_health(session, server_url):

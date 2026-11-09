@@ -83,7 +83,7 @@ def services(monkeypatch):
 def options(url):
     return SimpleNamespace(
         perception_mode="sam3_reference",
-        task="black_pepper_shaker를 집고 빈곳에 놓아",
+        task="black_pepper_shaker를 집고 제자리에 놓아",
         camera_url=url + "/camera",
         depth_url=url + "/depth",
         pose_url=url + "/pose",
@@ -160,11 +160,16 @@ def test_real_camera_without_measured_profile_fails(services, monkeypatch):
 
 def test_physical_check_validates_measured_camera_and_gateway_without_commands(services, monkeypatch, tmp_path):
     url, packet, requests, _ = services
-    packet.update(camera_model="orbbec/serial", camera_serial="serial", world_frame="base_link", robot_system=0)
+    packet.update(
+        camera_model="orbbec/serial", camera_serial="serial", world_frame="base_link", robot_system=0,
+        camera_frame="undistorted_color_optical",
+    )
     monkeypatch.setattr("tiptop.doosan.readiness.registered_object", lambda name: {})
     monkeypatch.setattr(
         "tiptop.doosan.hardware.load_hardware_profile",
-        lambda path: dict(_camera_calibration=dict(camera_serial="serial")),
+        lambda path, **kwargs: dict(_camera_calibration=dict(
+            camera_serial="serial", parent_link="link_6", camera_frame="undistorted_color_optical",
+        )),
     )
     args = options(url)
     args.hardware_profile, args.gateway_url = tmp_path / "measured.json", url + "/gateway"
@@ -181,7 +186,8 @@ def gateway_state():
         motion_status=0,
         joint_positions=[0] * 6,
         read_only=False,
-        gripper=dict(backend="uon_native", feedback_fresh=True),
+        gripper=dict(backend="uon_native", feedback_fresh=True, position_counts=1800,
+                     open_position_counts=1800, position_tolerance_counts=10),
         connections=dict(
             trajectory_action_ready=True,
             stop_service_ready=True,
@@ -210,6 +216,14 @@ def gateway_state():
 def test_execution_readiness_rejects_disconnected_or_wrong_backend(update):
     with pytest.raises(ValueError):
         check_gateway_state(gateway_state() | update, execute=True)
+
+
+def test_execution_readiness_reports_why_gripper_feedback_was_rejected():
+    state = gateway_state() | dict(gripper=dict(
+        backend="uon_native", feedback_fresh=False,
+        error="Observed UON position 2260 is outside the calibrated stroke [0, 1902]"))
+    with pytest.raises(ValueError, match=r"position 2260.*\[0, 1902\]"):
+        check_gateway_state(state, execute=True)
 
 
 def test_read_only_gateway_is_valid_for_planning_but_not_execution():

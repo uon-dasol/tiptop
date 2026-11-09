@@ -60,7 +60,9 @@ async def segment_detections(rgb, bboxes, grounded_atoms) -> dict:
         raise ValueError("Detections must have unique nonempty labels")
     grounded_atoms = [dict(atom, args=[arg.replace(" ", "_") for arg in atom["args"]]) for atom in grounded_atoms]
 
+    segment_started = time.perf_counter()
     masks = await asyncio.to_thread(sam2_segment_objects, Image.fromarray(rgb), bboxes)
+    _log.info(f"SAM2 segmentation took {time.perf_counter() - segment_started:.2f}s ({len(masks)} masks)")
 
     return {"bboxes": bboxes, "masks": masks, "grounded_atoms": grounded_atoms}
 
@@ -164,6 +166,7 @@ async def run_visual_perception(
     perception_mode=None,
     sam3_url=None,
     reference_scene=None,
+    on_update=None,
 ) -> dict:
     """One RGB/depth observation through the selected detector and common geometry.
 
@@ -192,11 +195,17 @@ async def run_visual_perception(
         detection_job = segment_detections(frame.rgb, active_task["bboxes"], active_task["grounded_atoms"])
     else:
         detection_job = detect_and_segment(frame.rgb, task_instruction, client=client, object_context=object_context)
+    async def completed(job, event):
+        result = await job
+        if on_update is not None:
+            await asyncio.to_thread(on_update, event, result)
+        return result
+
     depth, detection = await asyncio.gather(
-        predict_scene_depth(
+        completed(predict_scene_depth(
             session, frame, world_from_cam, cfg.perception.voxel_downsample_size, depth_estimator, gripper_mask
-        ),
-        detection_job,
+        ), "depth"),
+        completed(detection_job, "detection"),
     )
     objects = {}
     for bbox, mask in zip(detection["bboxes"], detection["masks"][:, 0]):

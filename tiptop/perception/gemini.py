@@ -22,8 +22,13 @@ def load_prompt(prompt_name: str) -> str:
 
 
 def _detect_and_translate_prompt_name() -> str:
-    if tiptop_cfg().experimental.pick_place_next_to:
+    experimental = tiptop_cfg().experimental
+    if experimental.pick_place_next_to and experimental.return_in_place:
+        raise ValueError("experimental.pick_place_next_to and experimental.return_in_place use different prompts")
+    if experimental.pick_place_next_to:
         return "detect_and_translate_pick_place_next_to"
+    if experimental.return_in_place:
+        return "detect_and_translate_return_in_place"
     return "detect_and_translate"
 
 

@@ -163,6 +163,12 @@ def test_pose_mask_mismatch_is_rejected_even_when_the_server_returned_a_pose():
     # A pose-fitting server can return a transform for the wrong, larger CAD.
     with pytest.raises(ValueError, match="target identity"):
         validate_cad_mask_alignment(vertices * 1.4, transform, k, mask)
+    relaxed = validate_cad_mask_alignment(vertices * 1.1, transform, k, mask, minimum_iou=0.75)
+    assert 0.75 <= relaxed["convex_silhouette_iou"] < 0.8
+    with pytest.raises(ValueError, match="target identity"):
+        validate_cad_mask_alignment(vertices * 1.1, transform, k, mask, minimum_iou=0.8)
+    with pytest.raises(ValueError, match="minimum_iou"):
+        validate_cad_mask_alignment(vertices, transform, k, mask, minimum_iou=float("nan"))
 
 
 def test_pose_rejects_wrong_cad_identity():

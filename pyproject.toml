@@ -107,6 +107,7 @@ find = { include = ["tiptop", "tiptop.*"] }
 
 [tool.setuptools.package-data]
 "tiptop.doosan" = ["assets/m1013_uon/*"]
+"tiptop" = ["ui/*.html"]
 
 [tool.setuptools_scm]
 version_scheme = "no-guess-dev"

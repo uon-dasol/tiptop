@@ -1,10 +1,11 @@
 {
-  "cad_root": "/media/uon/data1/3d_model/2026_real_world_test_objects",
-  "db_root": "/media/uon/data1/Dataset_2026/isaacsim_grasp_data_gen",
-  "source_csv": "/media/uon/data1/3d_model/2026_real_world_test_objects/2026_real_world_test_objects_attr.csv",
+  "cad_root": "/nas/ochansol/3d_model/2026_real_world_test_objects",
+  "db_root": "/nas/Dataset/Dataset_2026/isaacsim_grasp_data_gen",
+  "source_csv": "/nas/ochansol/3d_model/2026_real_world_test_objects/2026_real_world_test_objects_attr.csv",
   "objects": [
     {
       "class_id": "black_pepper_shaker",
+      "name_ko": "후추통",
       "visual_description": "This black pepper shaker features rectangular shape, brown cap, \"순후추\" text, and spice image. visible colors include black, brown, and white. Brown rectangular spice container with a brown lid and a white Korean pepper label; not a bottle with a black screw cap.",
       "aliases": [
         "후추통",
@@ -20,6 +21,7 @@
     },
     {
       "class_id": "car_leather_conditioner_bottle",
+      "name_ko": "천연가죽로션",
       "visual_description": "This car leather conditioner bottle features \"천연가죽 로션\" text, black cap, yellow body with white label, and flat bottle body. visible colors include yellow, white, and black. Orange/yellow leather conditioner bottle with a black cylindrical screw cap and a white front label; not the brown rectangular pepper container.",
       "aliases": [
         "가죽 로션 병",
@@ -38,6 +40,7 @@
     },
     {
       "class_id": "cooling_spray_70ml",
+      "name_ko": "쿨링스프레이",
       "visual_description": "This cooling spray 70ml features white cap, \"쿨링\" text, blue label, and cylindrical spray can. visible colors include white and blue.",
       "aliases": [
         "쿨링 스프레이 70ml",
@@ -49,6 +52,7 @@
     },
     {
       "class_id": "disney_mickey_handled_dipper",
+      "name_ko": "바가지",
       "visual_description": "This disney mickey handled dipper features white, black Mickey Mouse character graphic, elongated handle, handle cup shape, and smooth plastic surface. visible colors include white and black. White handled dipper: a round open bowl and a long white handle with Mickey decorations and a bone-like handle end.",
       "aliases": [
         "미키바가지",
@@ -64,6 +68,7 @@
     },
     {
       "class_id": "double_sided_rectangular_scrubber",
+      "name_ko": "수세미",
       "visual_description": "This double sided rectangular scrubber features rectangular shape, yellow on one side, green on the other side, divided into two surfaces, rectangular sponge body, double-sided layers, and rough scrub surface. visible colors include yellow and green.",
       "aliases": [
         "양면 사각 수세미",
@@ -75,6 +80,7 @@
     },
     {
       "class_id": "grip_strengthener_30KG",
+      "name_ko": "악력기",
       "visual_description": "This grip strengthener 30KG features black and red striped pattern, foam handles, metal spring, and grip-strengthener shape. visible colors include black, red, and silver.",
       "aliases": [
         "30kg 악력기",
@@ -86,6 +92,7 @@
     },
     {
       "class_id": "homekeeper_water_based_bug_spray",
+      "name_ko": "홈키파",
       "visual_description": "This homekeeper water based bug spray features \"홈키파\" text, navy, cylindrical shape, and aerosol can. visible colors include blue, white, and navy.",
       "aliases": [
         "홈키파 살충제",
@@ -97,6 +104,7 @@
     },
     {
       "class_id": "kids_toy_guitar",
+      "name_ko": "장난감 기타",
       "visual_description": "This kids toy guitar features mini guitar body, short neck, and dark finish. visible colors include black and apricot.",
       "aliases": [
         "장난감 기타",
@@ -108,6 +116,7 @@
     },
     {
       "class_id": "long_aluminum_flashlight",
+      "name_ko": "손전등",
       "visual_description": "This long aluminum flashlight features black cylindrical shape and ridged metal body. visible colors include black.",
       "aliases": [
         "알루미늄 손전등",
@@ -120,6 +129,7 @@
     },
     {
       "class_id": "maxtill_silent_wireless_mouse",
+      "name_ko": "마우스",
       "visual_description": "This maxtill silent wireless mouse features black mouse shape with red line trim, ergonomic mouse shape, and smooth top. visible colors include black and red.",
       "aliases": [
         "무소음 무선 마우스",
@@ -131,6 +141,7 @@
     },
     {
       "class_id": "mint_rechargeable_handheld_fan",
+      "name_ko": "손풍기",
       "visual_description": "This mint rechargeable handheld fan features cylindrical handle, hammer-like shape, and round fan head. visible colors include mint and white.",
       "aliases": [
         "민트색 손풍기",
@@ -142,6 +153,7 @@
     },
     {
       "class_id": "oriox_bubble_hand_wash_pump",
+      "name_ko": "손세정제",
       "visual_description": "This oriox bubble hand wash pump features pink pump, \"몽글몽글 거품비누\" text, printed label, and cylindrical bottle. visible colors include white and pink.",
       "aliases": [
         "오리옥스 몽글몽글 거품 비누",
@@ -154,6 +166,7 @@
     },
     {
       "class_id": "porsche_911_toy_car",
+      "name_ko": "장난감 차",
       "visual_description": "This porsche 911 toy car features toy car, red wheels, black windows, orange body, Porsche shape, and miniature car body. visible colors include orange, black, and red.",
       "aliases": [
         "포르쉐911 장난감 차",
@@ -165,6 +178,7 @@
     },
     {
       "class_id": "pp_handed_cup",
+      "name_ko": "머그컵",
       "visual_description": "This pp handed cup features cup shape with handle, logo on side, and cylindrical cup body. visible colors include beige, white, and dark green.",
       "aliases": [
         "pp 손잡이 컵",
@@ -176,6 +190,7 @@
     },
     {
       "class_id": "samyang_buldak_sauce_bottle",
+      "name_ko": "불닭소스통",
       "visual_description": "This samyang buldak sauce bottle features cylindrical shape, \"불닭\" text, flame graphic, black cap, sauce label, and small bottle body. visible colors include black, red, and white.",
       "aliases": [
         "삼양 불닭 소스통",
@@ -187,6 +202,7 @@
     },
     {
       "class_id": "small_squeeze_bottle",
+      "name_ko": "소스통",
       "visual_description": "This small squeeze bottle features cylindrical shape, yellow body with white cap, nozzle cap, and sauce bottle shape. visible colors include yellow and white.",
       "aliases": [
         "소형 소스통",
@@ -198,6 +214,7 @@
     },
     {
       "class_id": "small_watering_can",
+      "name_ko": "물뿌리개",
       "visual_description": "This small watering can features overall beige, long spout, round handle, and ribbed water can body. visible colors include ivory and beige.",
       "aliases": [
         "소형 물조리개",
@@ -209,6 +226,7 @@
     },
     {
       "class_id": "soft_peanut_massage_ball",
+      "name_ko": "마사지볼",
       "visual_description": "This soft peanut massage ball features peanut shape, beige, soft round ball, and smooth surface. visible colors include beige.",
       "aliases": [
         "손목 마사지볼",
@@ -221,6 +239,7 @@
     },
     {
       "class_id": "spam_classic_20G_can",
+      "name_ko": "스팸",
       "visual_description": "This spam classic 20G can features \"SPAM\" text, ham image, yellow cap, navy body, and rounded rectangular shape. visible colors include navy and yellow.",
       "aliases": [
         "스팸 클래식 20g 캔",
@@ -232,6 +251,7 @@
     },
     {
       "class_id": "stain_remover_gel",
+      "name_ko": "테크",
       "visual_description": "This stain remover gel features \"테크\" text, orange cap, and slim bottle. visible colors include navy, orange, white, and yellow.",
       "aliases": [
         "바르는 테크",
@@ -244,6 +264,7 @@
     },
     {
       "class_id": "t_shaped_3_outlet_adapter",
+      "name_ko": "3구 멀티탭",
       "visual_description": "This t shaped 3 outlet adapter features white, plug, T-shaped 3-outlet body, plug socket openings, and compact adapter. visible colors include white and silver.",
       "aliases": [
         "T자 3구 멀티탭",
@@ -255,6 +276,7 @@
     },
     {
       "class_id": "toy_story_pp_storage_container",
+      "name_ko": "저장용기",
       "visual_description": "This toy story pp storage container features pink lid, character graphic on side, rectangular container, and rounded corners. visible colors include white and pink.",
       "aliases": [
         "토이스토리 pp 저장용기",
@@ -266,6 +288,7 @@
     },
     {
       "class_id": "tpr_handle_peeler",
+      "name_ko": "감자칼",
       "visual_description": "This tpr handle peeler features Y-shaped peeler head, black handle, and metal blade. visible colors include black and silver.",
       "aliases": [
         "tpr 손잡이 감자칼",
@@ -277,6 +300,7 @@
     },
     {
       "class_id": "washing_machine_cleaner_bottle",
+      "name_ko": "세탁조 클리너",
       "visual_description": "This washing machine cleaner bottle features yellow cap, orange body, \"홈스타 퍼펙트 세탁조 클리너\" text, and cleaner label. visible colors include orange, white, and yellow.",
       "aliases": [
         "홈스타 퍼펙트 세탁조 클리너",
@@ -288,6 +312,7 @@
     },
     {
       "class_id": "lint_roller",
+      "name_ko": "돌돌이",
       "visual_description": "A white item with a handle, refillable design, and a T-shaped structure.",
       "aliases": [
         "돌돌이",
@@ -300,6 +325,7 @@
     },
     {
       "class_id": "ice_pack",
+      "name_ko": "아이스팩",
       "visual_description": "A blue square item with “ICE PACK” engraving and a snowflake pattern.",
       "aliases": [
         "아이스팩",
@@ -311,6 +337,7 @@
     },
     {
       "class_id": "paper_towel_stand",
+      "name_ko": "휴지 거치대",
       "visual_description": "A brown item with a round base, stick-type center axis, and wooden material.",
       "aliases": [
         "키친타올 거치대",
@@ -323,6 +350,7 @@
     },
     {
       "class_id": "mite_repellent",
+      "name_ko": "마이키파",
       "visual_description": "A white and light green pump-type container with a green pump cap, “마이키파” text, and a 뽀로로 character.",
       "aliases": [
         "마이키파",

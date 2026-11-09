@@ -1,0 +1,27 @@
+{
+  "common": {
+    "task": "car_leather_conditioner_bottle 집고 제자리에 놓아",
+    "camera_url": "http://127.0.0.1:13348",
+    "hardware_profile": "tiptop/config/m1013_fixed_hardware.declared.json",
+    "gateway_url": "http://127.0.0.1:8090",
+    "max_approach_tilt_deg": 20,
+    "cad_mask_min_iou": 0.6,
+    "min_table_clearance_m": 0.01,
+    "max_wrist_travel_deg": 90,
+    "min_engagement_depth_m": 0.02,
+    "table_support": "declared",
+    "viewer": true
+  },
+  "sam3_reference": {
+    "worker_socket": "/tmp/tiptop-{uid}/known-task.sock",
+    "reference_scene": "Lab/Uon_1F_Lab/table"
+  },
+  "gemini_er": {},
+  "services": [
+    {"name": "관측 서버", "host": "127.0.0.1", "port": 13348, "modes": ["sam3_reference", "gemini_er"]},
+    {"name": "FoundationPose 서버", "host": "127.0.0.1", "port": 13346, "modes": ["sam3_reference", "gemini_er"]},
+    {"name": "SAM3 서버", "host": "127.0.0.1", "port": 13347, "modes": ["sam3_reference"]},
+    {"name": "Gateway", "host": "127.0.0.1", "port": 8090, "modes": ["sam3_reference", "gemini_er"]},
+    {"name": "작업 워커", "socket": "/tmp/tiptop-{uid}/known-task.sock", "modes": ["sam3_reference"]}
+  ]
+}

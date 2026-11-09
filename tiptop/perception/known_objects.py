@@ -1,13 +1,27 @@
 """Registered CAD/DB provider following the common image perception front end."""
 
 import json
+import logging
 
 import numpy as np
 
-from tiptop.doosan.grasp_database import load_database_grasps
+from tiptop.doosan.grasp_database import load_database_grasps, warm_database_grasps
 from tiptop.object_catalog import DEFAULT_CATALOG, load_catalog
 from tiptop.object_catalog import registered_object as registered_object
+from tiptop.perception.cad_cache import load_cad_mesh
 from tiptop.perception.foundation_pose import estimate_pose
+
+_log = logging.getLogger(__name__)
+
+
+def prefetch_registered_assets(class_id):
+    """Read a class's CAD and grasp DB ahead of use; a failure resurfaces at the real load."""
+    try:
+        entry = registered_object(class_id)
+        load_cad_mesh(entry["cad"], entry["cad_scale_to_m"])
+        warm_database_grasps(entry["db"])
+    except Exception as error:
+        _log.warning("Asset prefetch failed: %s", error)
 
 
 def known_object_detection_context(*, catalog_path=DEFAULT_CATALOG):
@@ -48,7 +62,7 @@ def cad_support_point(vertices_m, world_from_cad):
     return support
 
 
-def validate_cad_mask_alignment(vertices_m, camera_from_cad, intrinsics, mask, *, minimum_iou=0.8):
+def validate_cad_mask_alignment(vertices_m, camera_from_cad, intrinsics, mask, *, minimum_iou=0.75):
     """Reject a gross CAD/mask silhouette mismatch before supplying DB grasps.
 
     Compare convex image silhouettes, so concavities/holes need no renderer.
@@ -57,6 +71,8 @@ def validate_cad_mask_alignment(vertices_m, camera_from_cad, intrinsics, mask, *
     """
     import cv2
 
+    if not np.isfinite(minimum_iou) or not 0 <= minimum_iou <= 1:
+        raise ValueError("minimum_iou must be finite and between 0 and 1")
     vertices = np.asarray(vertices_m, float)
     transform = np.asarray(camera_from_cad, float)
     mask = np.asarray(mask, np.uint8)
@@ -82,6 +98,15 @@ def validate_cad_mask_alignment(vertices_m, camera_from_cad, intrinsics, mask, *
     return dict(convex_silhouette_iou=iou, minimum_iou=minimum_iou, semantic_identity_verified=False)
 
 
+def require_return_in_place(grounded_atoms):
+    """The in-place runner executes only the return_in_place(target) preset."""
+    if len(grounded_atoms) != 1 or grounded_atoms[0]["predicate"] != "return_in_place" or len(grounded_atoms[0]["args"]) != 1:
+        raise ValueError(
+            f"The in-place runner supports only return_in_place(target); Gemini returned {grounded_atoms}. "
+            "Check experimental.return_in_place and the instruction."
+        )
+
+
 def registered_target(bboxes, grounded_atoms, *, catalog_path=DEFAULT_CATALOG):
     """Resolve one task target by explicit catalog aliases, never by label similarity."""
     entries = load_catalog(catalog_path)["objects"]
@@ -102,7 +127,8 @@ def registered_target(bboxes, grounded_atoms, *, catalog_path=DEFAULT_CATALOG):
 
 
 async def estimate_registered_grasps(
-    session, frame, visual, world_from_cam, *, entry, label, server_url, world_from_planner_object, grasp_from_tcp
+    session, frame, visual, world_from_cam, *, entry, label, server_url, world_from_planner_object, grasp_from_tcp,
+    cad_mask_min_iou=0.75,
 ):
     # Do not silently map a generic bottle label to a particular registered CAD.
     aliases = {normalize_label(value) for value in [entry["class_id"], *entry["aliases"]]}
@@ -125,11 +151,10 @@ async def estimate_registered_grasps(
         class_id=entry["class_id"],
         world_from_cam=world_from_cam,
     )
-    import trimesh
-
-    vertices = np.asarray(trimesh.load(entry["cad"], force="mesh", process=False).vertices) * entry["cad_scale_to_m"]
+    vertices = np.asarray(load_cad_mesh(entry["cad"], entry["cad_scale_to_m"]).vertices)
     pose["cad_mask_alignment"] = validate_cad_mask_alignment(
-        vertices, pose["camera_from_cad"], frame.intrinsics, visual["masks"][indices[0], 0]
+        vertices, pose["camera_from_cad"], frame.intrinsics, visual["masks"][indices[0], 0],
+        minimum_iou=cad_mask_min_iou,
     )
     grasps = load_database_grasps(
         entry["db"],

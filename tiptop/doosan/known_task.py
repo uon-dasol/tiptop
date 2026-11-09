@@ -13,35 +13,41 @@ from unittest.mock import patch
 
 import numpy as np
 
+from tiptop.doosan.planning_runtime import serialized_planning
+
 
 @dataclass(frozen=True)
 class KnownTaskPlanningSettings:
     """Numerical planning limits, independent of collision and approach checks."""
 
-    placement_support_tolerance_m: float = 0.01
-    placement_xy_tolerance_m: float = 0.01
     motion_timeout_s: float = 1.0
     motion_position_tolerance_m: float = 0.01
     motion_rotation_tolerance: float = 0.1
-    release_clearance_m: float | None = None
+    approach_distance_m: float = 0.15
+    lift_distance_m: float = 0.05
+    lift_hold_s: float = 1.0
+    approach_speed_factor: float = 0.9
+    descend_far_speed_factor: float = 0.7
+    descend_near_speed_factor: float = 0.7
+    lift_speed_factor: float = 0.7
+    home_speed_factor: float = 0.9
+    max_wrist_travel_deg: float = 90.0
+    min_table_clearance_m: float = 0.010
+    min_engagement_depth_m: float = 0.020
 
     def __post_init__(self):
-        values = [
-            self.placement_support_tolerance_m,
-            self.placement_xy_tolerance_m,
-            self.motion_timeout_s,
-            self.motion_position_tolerance_m,
-            self.motion_rotation_tolerance,
-        ]
+        for name, value in asdict(self).items():
+            if name.endswith("_speed_factor") and (not np.isfinite(value) or not 0 < value <= 1):
+                raise ValueError(f"{name} must be finite and in (0, 1]")
+        values = [value for name, value in asdict(self).items() if name != "min_engagement_depth_m"]
         if not np.isfinite(values).all() or min(values) <= 0:
-            raise ValueError("Planning time and tolerances must be finite and positive")
-        # Leave 5 mm beyond the two translational error budgets. This is a
-        # nominal model allowance, not a bound on calibration/rotation errors.
-        budget = self.placement_support_tolerance_m + self.motion_position_tolerance_m
-        clearance = budget + 0.005 if self.release_clearance_m is None else self.release_clearance_m
-        if not np.isfinite(clearance) or clearance <= budget:
-            raise ValueError("Release clearance must exceed support plus motion position tolerances")
-        object.__setattr__(self, "release_clearance_m", float(clearance))
+            raise ValueError("Planning time, lift and tolerances must be finite and positive")
+        if not np.isfinite(self.min_engagement_depth_m) or self.min_engagement_depth_m < 0:
+            raise ValueError("Minimum engagement depth must be finite and not negative")
+        if self.lift_distance_m <= self.motion_position_tolerance_m + .002:
+            raise ValueError("Lift distance must exceed the motion position tolerance plus 2 mm")
+        if self.approach_distance_m < self.lift_distance_m:
+            raise ValueError("Approach distance must not be shorter than the lift distance")
 
 
 def approach_tilt_mask(world_from_tcp, max_tilt_deg=3.0):
@@ -59,6 +65,14 @@ def approach_tilt_mask(world_from_tcp, max_tilt_deg=3.0):
     return -matrices[:, 2, 2] >= np.cos(np.deg2rad(limit)) - 1e-12
 
 
+def engagement_depth_m(world_from_tcp, world_from_cad, cad_vertices):
+    """Height of the highest posed CAD vertex above each TCP origin (the fingertip plane), in metres."""
+    pose = np.asarray(world_from_cad, float)
+    top_z = float((np.asarray(cad_vertices, float) @ pose[2, :3]).max() + pose[2, 3])
+    return top_z - np.asarray(world_from_tcp, float)[:, 2, 3]
+
+
+@serialized_planning
 def plan_known_task(
     env,
     scene,
@@ -69,16 +83,19 @@ def plan_known_task(
     robot_config=None,
     gripper_spheres=None,
     fixed_obstacles=(),
+    fixed_base_world_contact=False,
     max_approach_tilt_deg=3.0,
     planning_settings: KnownTaskPlanningSettings | None = None,
+    reuse_screened_ik: bool = True,
+    try_feasible_first: bool = True,
+    reuse_planners: bool = True,
+    unique_goals_first: bool = True,
 ):
     import cutamp.algorithm as algorithm
     import cutamp.tamp_world as tamp_world
-    import open3d as o3d
     import torch
-    import trimesh
     from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
-    from curobo.geom.types import Cuboid, WorldConfig
+    from curobo.geom.types import WorldConfig
     from curobo.types.base import TensorDeviceType
     from curobo.types.math import Pose
     from curobo.types.robot import RobotConfig
@@ -90,11 +107,17 @@ def plan_known_task(
     from cutamp.utils.shapes import sample_greedy_surface_spheres
 
     from tiptop.doosan.camera import with_camera_envelope
+    from tiptop.doosan.grasp_screening import screen_cad_grasps
+    from tiptop.doosan.ik_reuse import ScreenedIKReuse
+    from tiptop.doosan.known_planning import run_known_planning
+    from tiptop.doosan.planning_runtime import cached_planner, configuration_key, reset_ik, reset_motion_gen, unique_path_goals_first
     from tiptop.doosan.model import ASSETS, m1013_uon_curobo_cfg
     from tiptop.doosan.planning import prepare_joint_path
     from tiptop.doosan.tamp import m1013_entrypoint, verify_gateway_contract
+    from tiptop.perception.cad_cache import load_cad_mesh
     from tiptop.perception.known_objects import registered_object
-    from tiptop.perception.placement import placement_surface_height
+    from tiptop.perception.placement import table_support_z
+    from tiptop.doosan.in_place import make_in_place_solver, source_region, validate_in_place_plan
     from tiptop.planning import run_planning, serialize_plan
     from tiptop.utils import NumpyEncoder
 
@@ -116,88 +139,54 @@ def plan_known_task(
     )
     if tool.ndim != 2 or tool.shape[1] != 4 or not len(tool) or not np.isfinite(tool).all() or np.any(tool[:, 3] <= 0):
         raise ValueError("Expected positive finite open-tool collision spheres at this model TCP")
+    filter_started = time.perf_counter()
     centers = np.einsum("nij,kj->nki", tcp[:, :3, :3], tool[:, :3]) + tcp[:, None, :3, 3]
-    support_z = scene.perception_results["empty_region"]["support_z_m"]
+    support_z = table_support_z(scene.table_cuboid.pose[2] + scene.table_cuboid.dims[2] / 2)
     table_clearance = (centers[:, :, 2] - tool[None, :, 3] - support_z).min(1)
-    valid = np.flatnonzero(approach_tilt_mask(tcp, max_approach_tilt_deg) & (table_clearance >= 0.002))
-    mesh = trimesh.load(entry["cad"], force="mesh", process=False)
-    mesh.vertices *= entry["cad_scale_to_m"]
+    # Reject candidates whose open gripper spheres come closer than the configured clearance to the
+    # support plane, which lies 20 mm above the estimated tabletop.
+    valid = np.flatnonzero(
+        approach_tilt_mask(tcp, max_approach_tilt_deg) & (table_clearance >= settings.min_table_clearance_m)
+    )
+    table_filter_seconds = time.perf_counter() - filter_started
+    cad_started = time.perf_counter()
+    mesh = load_cad_mesh(entry["cad"], entry["cad_scale_to_m"])
     hull = mesh.convex_hull
-    inverse = np.linalg.inv(pose)
-    screened, gaps = [], []
-    for index in valid:
-        transform = inverse @ tcp[index]
-        local = tool[:, :3] @ transform[:3, :3].T + transform[:3, 3]
-        _, distances, _ = trimesh.proximity.closest_point_naive(hull, local)
-        inside = (np.einsum("sfj,fj->sf", local[:, None] - hull.triangles_center[None], hull.face_normals) <= 1e-9).all(
-            1
-        )
-        gap = float((np.where(inside, -distances, distances) - tool[:, 3]).min())
-        if gap >= 0.0005:
-            screened.append(int(index))
-            gaps.append(gap)
+    cad_model_seconds = time.perf_counter() - cad_started
+    engagement_depth = engagement_depth_m(tcp, pose, mesh.vertices)
+    deep_enough = valid[engagement_depth[valid] >= settings.min_engagement_depth_m]
+    cad_started = time.perf_counter()
+    # IK only consumes the first 48 clear candidates. Stop as soon as that
+    # same ordered prefix is known; later candidates cannot change its input.
+    cad_candidate_limit = 48
+    cad_screening = screen_cad_grasps(tcp, pose, tool, deep_enough, hull, limit=cad_candidate_limit)
+    screened = cad_screening.indices
+    cad_check_seconds = time.perf_counter() - cad_started
     if not screened:
         raise ValueError(
-            f"No DB grasp within {max_approach_tilt_deg:g} degrees clears observed table and full CAD hull"
+            f"No DB grasp within {max_approach_tilt_deg:g} degrees clears observed table, "
+            f"{settings.min_engagement_depth_m * 1000:g} mm minimum engagement depth and full CAD hull "
+            f"(tilt and table: {len(valid)}, then depth: {len(deep_enough)}, then CAD hull: 0)"
         )
     screening_seconds = time.perf_counter() - started
 
-    # All above-table scene points count, including objects the VLM did not name.
-    # The depth estimator already removed visible robot points using current FK.
     visual = scene.perception_results
-    xyz = visual["xyz_map"]
-    target_index = next(i for i, box in enumerate(visual["bboxes"]) if box["label"] == name)
-    good = np.isfinite(xyz).all(-1) & ~visual["masks"][target_index, 0]
     table = scene.table_cuboid
-    low = np.asarray(table.pose[:3]) - np.asarray(table.dims) / 2
-    high = np.asarray(table.pose[:3]) + np.asarray(table.dims) / 2
-    good &= (xyz[..., 2] > support_z + 0.012) & (xyz[..., 2] < support_z + 0.5)
-    good &= (xyz[..., 0] > low[0]) & (xyz[..., 0] < high[0])
-    good &= (xyz[..., 1] > low[1]) & (xyz[..., 1] < high[1])
-    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(xyz[good])).voxel_down_sample(0.008)
-    points = np.asarray(cloud.points)
-    labels = np.asarray(cloud.cluster_dbscan(eps=0.035, min_points=12)) if len(points) else np.array([])
-    obstacles = []
-    for index in sorted(set(labels.tolist()) - {-1}):
-        group = points[labels == index]
-        low, high = group.min(0), group.max(0)
-        obstacles.append(
-            Cuboid(
-                name=f"observed_obstacle_{index}",
-                dims=(high - low + 0.012).tolist(),
-                pose=[*((low + high) / 2).tolist(), 1, 0, 0, 0],
-            )
-        )
-    # Other objects remain static obstacles for this single-object task.
     env = copy.deepcopy(env)
-    env.movables = [obj for obj in env.movables if obj.name == name]
-    # cuTAMP already uses sampled partial-hull spheres for movable collision
-    # checks. Cache that same representation so its real lower envelope can
-    # also define the release height, with no full-CAD collision replacement.
-    obj = env.movables[0]
-    if not np.allclose(obj.pose[3:], [1, 0, 0, 0]):
-        raise ValueError("Observed placement expects a world-aligned partial hull object frame")
+    # The task goal is holding the identified object; our motion adapter then
+    # returns it along the checked lift path, rather than sampling a new place.
+    from cutamp.tamp_domain import Holding
+
+    env.goal_state = frozenset({Holding.ground(name)})
+    env.type_to_objects["Surface"] = [table]
+    obj = next(item for item in env.movables if item.name == name)
     sampled = sample_greedy_surface_spheres(obj, n_spheres=32, sphere_radius=0.003)
-    sphere_bottom = float((sampled[:, 2] - sampled[:, 3]).min())
     cad_world = np.asarray(mesh.vertices) @ pose[:3, :3].T + pose[:3, 3]
-    cad_bottom = float(cad_world[:, 2].min() - obj.pose[2])
-    region = visual["empty_region"]
-    surface = next(surface for surface in env.type_to_objects["Surface"] if surface.name == "observed_empty_region")
-    top = placement_surface_height(
-        support_z=support_z,
-        cad_bottom=cad_bottom,
-        sphere_bottom=sphere_bottom,
-        release_clearance=settings.release_clearance_m,
-    )
-    surface.pose[2] = top - surface.dims[2] / 2
-    region.update(
-        planning_surface_top_z_m=top,
-        release_clearance_m=settings.release_clearance_m,
-        sampled_sphere_bottom_local_m=sphere_bottom,
-        estimated_cad_bottom_local_m=cad_bottom,
-        planner_support_buffer_m=0.002,
-        support_tolerance_m=settings.placement_support_tolerance_m,
-    )
+    table_bounds = (np.asarray(table.pose[:3]) + np.array([-.5, .5])[:, None]*np.asarray(table.dims))
+    region = visual.get("placement_region")
+    if not region or region.get("source") != "in_place_return":
+        region = source_region(table_bounds, cad_world)
+    visual["placement_region"] = region
 
     # Keep the original partial-hull Mesh in both the IK and motion worlds.
     # Only memoize its sphere sampling; substituting a sphere mesh here would
@@ -209,10 +198,14 @@ def plan_known_task(
             return sampled.clone()
         return sample_greedy_surface_spheres(current, n_spheres, sphere_radius, **kwargs)
 
-    (output / "empty-region.json").write_text(json.dumps(region, cls=NumpyEncoder, indent=2) + "\n")
-    env.statics.extend([*obstacles, *fixed_obstacles])
+    (output / "placement-region.json").write_text(json.dumps(region, cls=NumpyEncoder, indent=2) + "\n")
+    env.statics.extend(fixed_obstacles)
     env.type_to_objects["Movable"] = env.movables
     cfg = copy.deepcopy(m1013_uon_curobo_cfg() if robot_config is None else robot_config)
+    # Stay inside the wire limits after float32 planning/interpolation. Keep the
+    # gateway's strict limits unchanged; never clamp a generated trajectory.
+    cspace = cfg["robot_cfg"]["kinematics"]["cspace"]
+    cspace["position_limit_clip"] = np.maximum(cspace.get("position_limit_clip", 0), 0.001).tolist()
     if camera_profile is not None:
         cfg = with_camera_envelope(
             cfg,
@@ -222,22 +215,39 @@ def plan_known_task(
             else ASSETS / "m1013_uon.urdf",
             output_dir=output / "model",
         )
-    static_world = WorldConfig(cuboid=[table, *obstacles, *fixed_obstacles])
-    ik = IKSolver(
-        IKSolverConfig.load_from_robot_config(
-            copy.deepcopy(cfg["robot_cfg"]),
-            static_world,
-            num_seeds=32,
-            self_collision_check=True,
-            self_collision_opt=True,
-            position_threshold=0.001,
-            rotation_threshold=0.01,
-            use_cuda_graph=False,
+    static_world = WorldConfig(cuboid=[table, *fixed_obstacles])
+    model_key = configuration_key(cfg, tool, fixed_base_world_contact)
+    def build_ik():
+        ik = IKSolver(
+            IKSolverConfig.load_from_robot_config(
+                copy.deepcopy(cfg["robot_cfg"]),
+                static_world,
+                num_seeds=32,
+                self_collision_check=True,
+                self_collision_opt=True,
+                position_threshold=0.001,
+                rotation_threshold=0.01,
+                use_cuda_graph=False,
+            )
         )
-    )
-    batch = np.asarray(screened[:48])
+        if fixed_base_world_contact:
+            from tiptop.doosan.fixed_base_contact import allow_fixed_base_mounting_contact
+            allow_fixed_base_mounting_contact(ik)
+        return ik
+    ik, ik_runtime = cached_planner('ik', model_key, build_ik,
+        lambda value: reset_ik(value, copy.deepcopy(static_world)), enabled=reuse_planners)
+    if fixed_base_world_contact:
+        from tiptop.doosan.fixed_base_contact import allow_fixed_base_mounting_contact, check_fixed_base_clearance
+
+        # Only tabletop mounting contact is intentional. Other static geometry
+        # must clear the stationary base before omitting its constant world cost.
+        check_fixed_base_clearance(ik.kinematics, observation.q_init,
+            [box for box in fixed_obstacles if box.name != "configured_full_table"])
+    batch = np.asarray(screened)
     ik_started = time.perf_counter()
-    solved = ik.solve_batch(Pose.from_matrix(ik.tensor_args.to_device(tcp[batch])), return_seeds=4)
+    screened_goals = Pose.from_matrix(ik.tensor_args.to_device(tcp[batch]))
+    solved = ik.solve_batch(screened_goals, return_seeds=4)
+    reusable_ik = ScreenedIKReuse(ik, screened_goals, solved) if reuse_screened_ik else None
     feasible = batch[solved.success.any(dim=1).cpu().numpy()]
     ik_seconds = time.perf_counter() - ik_started
     # Angle, geometry and IK screening preserve the DB's descending score order.
@@ -245,14 +255,18 @@ def plan_known_task(
     if not len(selected):
         raise ValueError("No camera-aware IK candidate in the screened batch")
     tensor = TensorDeviceType()
-    kin = CudaRobotModel(RobotConfig.from_dict(copy.deepcopy(cfg["robot_cfg"]), tensor).kinematics)
-    container = RobotContainer(
-        "m1013_uon",
-        kin,
-        kin.kinematics_config.joint_limits.position,
-        tensor.to_device(tool),
-        torch.eye(4, device=tensor.device),
-    )
+    def build_container():
+        kin = CudaRobotModel(RobotConfig.from_dict(copy.deepcopy(cfg["robot_cfg"]), tensor).kinematics)
+        return RobotContainer(
+            "m1013_uon",
+            kin,
+            kin.kinematics_config.joint_limits.position,
+            tensor.to_device(tool),
+            torch.eye(4, device=tensor.device),
+        )
+    container, container_runtime = cached_planner('container', model_key, build_container,
+        lambda value: None, enabled=reuse_planners)
+    kin = container.kin_model
     grasps = {
         name: dict(grasps_obj=supplied["grasps_obj"][selected], confidences_pt=supplied["confidences_pt"][selected])
     }
@@ -265,7 +279,7 @@ def plan_known_task(
         grasp_dof=6,
         num_initial_plans=1,
         curobo_plan=True,
-        max_motion_refine_attempts=3,
+        max_motion_refine_attempts=None,
         enable_visualizer=False,
         enable_experiment_logging=False,
         warmup_ik=False,
@@ -273,33 +287,65 @@ def plan_known_task(
         coll_n_spheres=32,
         coll_sphere_radius=0.003,
         placement_check="obb",
-        time_dilation_factor=0.2,
+        time_dilation_factor=settings.approach_speed_factor,
     )
     robot_cfg = copy.deepcopy(cfg)
     robot_cfg["robot_cfg"]["kinematics"]["extra_collision_spheres"]["attached_object"] = 32
-    mg = MotionGen(
-        MotionGenConfig.load_from_robot_config(
-            robot_cfg=robot_cfg,
-            world_model=get_world_cfg(copy.deepcopy(env), include_movables=True),
-            use_cuda_graph=False,
-            trajopt_particle_opt=False,
-            num_trajopt_seeds=4,
-            num_graph_seeds=4,
-            position_threshold=settings.motion_position_tolerance_m,
-            rotation_threshold=settings.motion_rotation_tolerance,
-        )
-    )
 
     def safe_world(environment, include_movables=False):
         return get_world_cfg(copy.deepcopy(environment), include_movables=include_movables)
+
+    def build_motion_gen():
+        initial_world = safe_world(env, include_movables=True)
+        mg = MotionGen(
+            MotionGenConfig.load_from_robot_config(
+                robot_cfg=robot_cfg,
+                world_model=initial_world,
+                collision_cache={'obb': max(1, len(initial_world.cuboid)),
+                                 'mesh': max(1, len(initial_world.mesh))},
+                use_cuda_graph=False,
+                trajopt_particle_opt=False,
+                num_trajopt_seeds=4,
+                num_graph_seeds=4,
+                position_threshold=settings.motion_position_tolerance_m,
+                rotation_threshold=settings.motion_rotation_tolerance,
+            )
+        )
+        if fixed_base_world_contact:
+            allow_fixed_base_mounting_contact(mg)
+        return mg
+    mg, motion_runtime = cached_planner('motion', configuration_key(model_key, asdict(settings)), build_motion_gen,
+        lambda value: reset_motion_gen(value, safe_world(env, include_movables=True)), enabled=reuse_planners)
+
+    original_rank = algorithm.get_ranked_satisfying_particles
+    particle_order = []
+    def rank_particles(plan_info, *args, **kwargs):
+        particles = original_rank(plan_info, *args, **kwargs)
+        if not unique_goals_first:
+            return particles
+        grasp_keys = [op.values[1] for op in plan_info['plan_skeleton'] if op.operator.name == 'Pick']
+        particles, audit = unique_path_goals_first(particles, grasp_keys)
+        particle_order.append(audit)
+        return particles
+
+    original_world_cost = tamp_world.get_world_collision_cost
+    def world_cost(*args, **kwargs):
+        from tiptop.doosan.fixed_base_contact import filter_fixed_base_world_cost
+
+        return filter_fixed_base_world_cost(original_world_cost(*args, **kwargs), kin)
 
     surfaces = env.type_to_objects["Surface"]
     with (
         m1013_entrypoint(container, motion_timeout_s=settings.motion_timeout_s),
         patch.object(algorithm, "get_world_cfg", safe_world),
+        patch.object(tamp_world, "get_world_cfg", safe_world),
+        patch.object(algorithm, "solve_curobo", make_in_place_solver(settings)),
+        patch.object(algorithm, "get_ranked_satisfying_particles", rank_particles),
         patch.object(tamp_world, "sample_greedy_surface_spheres", cached_sample),
+        patch.object(tamp_world, "get_world_collision_cost", world_cost if fixed_base_world_contact else original_world_cost),
     ):
-        plan, elapsed, failure = run_planning(
+        plan, elapsed, failure, search = run_known_planning(
+            run_planning,
             env,
             config,
             observation.q_init,
@@ -307,17 +353,24 @@ def plan_known_task(
             grasps,
             mg,
             surfaces,
-            placement_support_tolerance=settings.placement_support_tolerance_m,
-            placement_xy_tolerance=settings.placement_xy_tolerance_m,
+            screened_ik=reusable_ik,
+            try_feasible_first=try_feasible_first,
         )
     if plan is None:
-        raise RuntimeError(f"Existing cuTAMP found no complete pick/place plan: {failure}")
+        raise RuntimeError(f"Existing cuTAMP found no complete in-place pick/return plan: {failure}")
     serialized = serialize_plan(plan, observation.q_init)
+    for step in plan:
+        if step.get("label") == "Pick.descend" and "grasp_target_world_from_tcp" in step:
+            serialized["selected_grasp"] = dict(world_from_tcp=step["grasp_target_world_from_tcp"],
+                                                source="completed_motion_plan")
     serialized.update(
         robot="m1013_uon",
-        empty_region=visual["empty_region"],
+        placement_region=region,
+        task_mode="in_place_return",
+        returns_to_start=True,
         class_id=entry["class_id"],
         max_approach_tilt_deg=float(max_approach_tilt_deg),
+        max_motion_refine_attempts=None,
         planning_settings=asdict(settings),
         label=name,
         physical_grasp_verified=False,
@@ -326,21 +379,49 @@ def plan_known_task(
         if step["type"] == "trajectory":
             positions, velocities, _ = prepare_joint_path(step["positions"], step["velocities"], step["dt"])
             step.update(positions=positions, velocities=velocities)
+
+    def tcp_at(q):
+        state = kin.get_state(tensor.to_device(np.asarray(q)[None]))
+        return state.ee_pose.get_matrix().cpu().numpy()[0]
+
+    return_check = validate_in_place_plan(serialized, tcp_at,
+        lift_distance_m=settings.lift_distance_m, position_tolerance_m=settings.motion_position_tolerance_m)
+    serialized["in_place_return_check"] = return_check
     report = dict(
+        in_place_return_check=return_check,
         planning_seconds=elapsed,
         planning_total_seconds=time.perf_counter() - started,
         candidate_screening_seconds=screening_seconds,
+        candidate_table_filter_seconds=table_filter_seconds,
+        cad_model_seconds=cad_model_seconds,
+        cad_collision_check_seconds=cad_check_seconds,
         ik_screening_seconds=ik_seconds,
+        ik_reuse=dict(
+            {} if reusable_ik is None else reusable_ik.stats,
+            enabled=reuse_screened_ik, complete_plan_fallback=(
+                reusable_ik is not None and reusable_ik.stats["reused_batches"] > 0 and len(search["attempts"]) > 1
+            ),
+        ),
+        planning_search=search,
         planning_settings=asdict(settings),
+        planner_runtime=dict(enabled=reuse_planners, ik=ik_runtime, container=container_runtime, motion=motion_runtime),
+        particle_order=dict(enabled=unique_goals_first, passes=particle_order),
         supplied_candidate_ids=data["candidate_indices"][selected].tolist(),
+        tilt_and_table_candidates=len(valid),
+        engagement_depth_candidates=len(deep_enough),
+        supplied_engagement_depth_mm=(engagement_depth[selected] * 1000).tolist(),
         hull_clear_candidates=len(screened),
+        hull_clear_candidates_complete=cad_screening.complete,
+        cad_candidate_limit=cad_candidate_limit,
+        cad_candidates_available=cad_screening.available,
+        cad_candidates_checked=cad_screening.checked,
+        cad_distance_queries=cad_screening.distance_queries,
+        cad_distance_points=cad_screening.distance_points,
         gravity_preference_applied=False,
         supplied_approach_tilt_deg=np.rad2deg(np.arccos(np.clip(-tcp[selected, 2, 2], -1, 1))).tolist(),
-        observed_obstacles=len(obstacles),
+        max_motion_refine_attempts=None,
         max_approach_tilt_deg=float(max_approach_tilt_deg),
         configured_fixed_obstacles=len(fixed_obstacles),
-        placement_support_tolerance_m=settings.placement_support_tolerance_m,
-        placement_xy_tolerance_m=settings.placement_xy_tolerance_m,
         motion_planning_timeout_s=settings.motion_timeout_s,
         sequence=[step["label"] for step in plan],
         executor_calls=verify_gateway_contract(serialized),

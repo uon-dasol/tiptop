@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from tiptop.perception.known_objects import registered_target
-from tiptop.perception.placement import select_observed_free_region
 
 
 def test_alias_requires_unique_known_target():
@@ -22,47 +21,6 @@ def test_alias_requires_unique_known_target():
     assert entry["class_id"] == "car_leather_conditioner_bottle"
     with pytest.raises(ValueError, match="uniquely"):
         registered_target([dict(label="orange_bottle")], [dict(predicate="on", args=["orange_bottle", "table"])])
-
-
-def test_empty_region_requires_observed_support_and_avoids_occupancy():
-    x, y = np.meshgrid(np.arange(0, 1, 0.005), np.arange(-0.4, 0.4, 0.005))
-    table = np.c_[x.ravel(), y.ravel(), np.full(x.size, 0.4)]
-    target = np.array([0.45, -0.15, 0.45])
-    obstacle = np.array([[0.60, -0.15, 0.45]])
-    # A large invisible patch must not be chosen as free space.
-    table = table[~((table[:, 0] > 0.55) & (table[:, 1] > 0.05))]
-    result = select_observed_free_region(
-        np.vstack([table, obstacle]),
-        table_bounds=[[0, -0.4, 0.37], [1, 0.4, 0.38]],
-        target_center=target,
-        footprint_radius=0.05,
-    )
-    center = np.asarray(result["center_xy_m"])
-    assert np.linalg.norm(center - target[:2]) >= 0.14
-    assert np.linalg.norm(center - obstacle[0, :2]) > result["checked_radius_m"]
-    assert result["observed_support_fraction"] >= 0.98
-    assert not result["unknown_space_is_free"]
-    with pytest.raises(ValueError, match="No sufficiently observed"):
-        select_observed_free_region(
-            obstacle, table_bounds=[[0, -0.4, 0.37], [1, 0.4, 0.38]], target_center=target, footprint_radius=0.05
-        )
-
-
-def test_known_rectangular_support_does_not_count_the_footprint_twice():
-    x, y = np.meshgrid(np.arange(0.6, 0.8001, 0.005), np.arange(-0.4, 0.4001, 0.005))
-    table = np.c_[x.ravel(), y.ravel(), np.full(x.size, 0.4)]
-    args = dict(
-        table_bounds=[[0.6, -0.4, 0.37], [0.8, 0.4, 0.38]], target_center=[0.65, -0.3, 0.45], footprint_radius=0.13
-    )
-    # A long object fits this observed strip, although its enclosing disk does not.
-    with pytest.raises(ValueError, match="No observed empty"):
-        select_observed_free_region(table, **args)
-    region = select_observed_free_region(table, **args, footprint_size_xy=[0.08, 0.24])
-    np.testing.assert_allclose(region["size_xy_m"], [0.11, 0.27])
-    assert region["occupancy_shape"] == "rectangle" and region["observed_support_fraction"] >= 0.98
-    assert not region["unknown_space_is_free"]
-    with pytest.raises(ValueError, match="No observed empty"):
-        select_observed_free_region(table[table[:, 1] < -0.25], **args, footprint_size_xy=[0.08, 0.24])
 
 
 def test_registered_tcp_is_rebased_without_panda_correction(monkeypatch):
@@ -116,47 +74,6 @@ def test_registered_tcp_is_rebased_without_panda_correction(monkeypatch):
     np.testing.assert_allclose(table_calls[0]["support_points_world"], [[0.5, 0.1, 0.4]])
 
 
-def test_release_height_accounts_for_sampled_envelope_and_planner_buffer_once():
-    from tiptop.perception.placement import placement_surface_height
-
-    # A cropped hull starts 12 mm above the CAD bottom, and its 3 mm
-    # spheres extend below the hull. Include cuTAMP's separate 2 mm buffer.
-    cad_bottom, sphere_bottom = -0.04, -0.04 + 0.012 - 0.003
-    top = placement_surface_height(support_z=0.4, cad_bottom=cad_bottom, sphere_bottom=sphere_bottom)
-    placed_origin = top + 0.002 - sphere_bottom
-    assert placed_origin + cad_bottom == pytest.approx(0.403)
-    with pytest.raises(ValueError, match="finite"):
-        placement_surface_height(support_z=np.nan, cad_bottom=0, sphere_bottom=0)
-
-
-@pytest.mark.parametrize(
-    "options",
-    [dict(), dict(placement_support_tolerance_m=0.002, motion_position_tolerance_m=0.005)],
-)
-def test_release_height_retains_nominal_clearance_with_relaxed_tolerances(options):
-    from tiptop.doosan.known_task import KnownTaskPlanningSettings
-    from tiptop.perception.placement import placement_surface_height
-
-    settings = KnownTaskPlanningSettings(**options)
-    cad_bottom, sphere_bottom = -0.04, -0.031
-    top = placement_surface_height(
-        support_z=0.4,
-        cad_bottom=cad_bottom,
-        sphere_bottom=sphere_bottom,
-        release_clearance=settings.release_clearance_m,
-    )
-    # Apply both allowed downward translation errors to the nominal placement.
-    lowest_cad_bottom = (
-        top
-        + 0.002
-        - sphere_bottom
-        + cad_bottom
-        - settings.placement_support_tolerance_m
-        - settings.motion_position_tolerance_m
-    )
-    assert lowest_cad_bottom == pytest.approx(0.405)
-
-
 @pytest.mark.parametrize(
     "options",
     [
@@ -164,11 +81,18 @@ def test_release_height_retains_nominal_clearance_with_relaxed_tolerances(option
         dict(motion_timeout_s=float("nan")),
         dict(motion_position_tolerance_m=-0.01),
         dict(motion_rotation_tolerance=float("inf")),
-        dict(placement_support_tolerance_m=0),
-        dict(placement_xy_tolerance_m=-0.01),
-        dict(release_clearance_m=0.003),
-        dict(release_clearance_m=0.02),
-        dict(release_clearance_m=float("nan")),
+        dict(approach_distance_m=0),
+        dict(approach_distance_m=.04),
+        dict(lift_distance_m=0),
+        dict(lift_distance_m=.005),
+        dict(lift_hold_s=0),
+        dict(lift_hold_s=float("nan")),
+        dict(max_wrist_travel_deg=0),
+        dict(max_wrist_travel_deg=float("inf")),
+        dict(min_table_clearance_m=0),
+        dict(min_table_clearance_m=float("nan")),
+        dict(min_engagement_depth_m=-0.001),
+        dict(min_engagement_depth_m=float("nan")),
     ],
 )
 def test_planning_settings_reject_invalid_or_inconsistent_limits(options):
@@ -176,6 +100,33 @@ def test_planning_settings_reject_invalid_or_inconsistent_limits(options):
 
     with pytest.raises(ValueError):
         KnownTaskPlanningSettings(**options)
+
+
+@pytest.mark.parametrize("name", [
+    "approach_speed_factor", "descend_far_speed_factor", "descend_near_speed_factor",
+    "lift_speed_factor", "home_speed_factor",
+])
+@pytest.mark.parametrize("value", [0, 1.01, float("nan"), float("inf")])
+def test_stage_speed_factors_require_positive_finite_ratios_at_most_one(name, value):
+    from tiptop.doosan.known_task import KnownTaskPlanningSettings
+
+    with pytest.raises(ValueError, match=name):
+        KnownTaskPlanningSettings(**{name: value})
+
+
+def test_engagement_depth_is_measured_from_the_posed_cad_top_and_zero_disables_the_bound():
+    from tiptop.doosan.known_task import KnownTaskPlanningSettings, engagement_depth_m
+
+    assert KnownTaskPlanningSettings().min_engagement_depth_m == pytest.approx(0.02)
+    assert KnownTaskPlanningSettings(min_engagement_depth_m=0).min_engagement_depth_m == 0
+    # A 5 cm tall CAD whose origin is on its bottom, posed 1 cm above the table and turned about world Z.
+    vertices = np.array([[0, 0, 0], [.03, .02, .05], [-.03, .01, .02]])
+    pose = np.eye(4)
+    pose[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    pose[2, 3] = .01
+    tcp = np.tile(np.eye(4), (3, 1, 1))
+    tcp[:, 2, 3] = [.06, .04, .02]
+    np.testing.assert_allclose(engagement_depth_m(tcp, pose, vertices), [0, .02, .04], atol=1e-12)
 
 
 def test_approach_bound_preserves_database_score_order(tmp_path):

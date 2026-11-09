@@ -124,6 +124,81 @@ def test_interactive_failure_then_next_instruction_uses_new_task_and_no_roi(tmp_
     assert results[0]["status"] == "failed" and results[0]["failed_stage"] == "perception"
     assert results[1]["success"] is True
     assert results[0]["observation_id"] != results[1]["observation_id"]
+    timings = [json.loads((path / "timings.json").read_text()) for _, path in calls]
+    assert timings[0]["phases"][0]["status"] == "failed"
+    assert timings[1]["phases"][0]["status"] == "completed"
+    assert "cli_wall_seconds" not in timings[1]  # No interactive think time in task timings.
+    assert timings[0]["process_id"] == timings[1]["process_id"]
+    assert timings[1]["task_index_in_process"] == timings[0]["task_index_in_process"] + 1
+    assert timings[0]["status"] == "failed" and timings[1]["status"] == "completed"
+
+
+@pytest.mark.parametrize("task_fails", [False, True])
+@pytest.mark.parametrize("save_fails", [False, True])
+def test_task_drains_background_before_result_and_records_timings(tmp_path, monkeypatch, task_fails, save_fails):
+    async def exercise():
+        started, release, planned = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def save():
+            started.set()
+            await release.wait()
+            if save_fails:
+                raise OSError("test disk failure")
+            (tmp_path / "saved.txt").write_text("done")
+
+        async def task(args):
+            args._stage = "planning"
+            args._timing_trace.phase("planning")
+            args._background.append(asyncio.create_task(save()))
+            await started.wait()
+            # Planning finishes while saving is still blocked.
+            assert not args._background[0].done()
+            planned.set()
+            if task_fails:
+                raise ValueError("test planning failure")
+            return dict(status="planned", success=None, executed=False)
+
+        monkeypatch.setattr(runner, "run", task)
+        args = SimpleNamespace(output=tmp_path, task="test", perception_mode="sam3_reference")
+        pending = asyncio.create_task(runner.run_task(args))
+        await asyncio.wait_for(planned.wait(), timeout=3)
+        assert not pending.done()
+        assert not (tmp_path / "task-result.json").exists()
+        release.set()
+        return await pending
+
+    result = asyncio.run(exercise())
+    saved = json.loads((tmp_path / "task-result.json").read_text())
+    assert saved == result
+    assert saved["status"] == ("failed" if task_fails else "planned")
+    assert saved.get("perception_save_errors") == (["test disk failure"] if save_fails else None)
+    assert (tmp_path / "saved.txt").exists() is not save_fails
+    timings = json.loads((tmp_path / "timings.json").read_text())
+    phases = {entry["name"]: entry for entry in timings["phases"]}
+    assert phases["planning"]["status"] == ("failed" if task_fails else "completed")
+    assert "background_save_wait" in phases and "task_result_save" in phases
+    assert timings["task_wall_seconds"] >= sum(p["duration_s"] for p in timings["phases"])
+
+
+def test_optional_timing_write_failure_preserves_task_result(tmp_path, monkeypatch):
+    async def task(args):
+        return dict(status="planned", success=None, executed=False)
+
+    original = runner.Path.write_text
+
+    def write(path, *args, **kwargs):
+        if path.name == "timings.json":
+            raise OSError("timing file unavailable")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(runner, "run", task)
+    monkeypatch.setattr(runner.Path, "write_text", write)
+    args = SimpleNamespace(
+        output=tmp_path, task="test", perception_mode="sam3_reference", _cli_started_at=runner.time.perf_counter(),
+    )
+    result = asyncio.run(runner.run_task(args))
+    assert result["status"] == "planned"
+    assert json.loads((tmp_path / "task-result.json").read_text()) == result
 
 
 def test_polling_rejects_old_task_result_even_if_finished():
@@ -212,28 +287,51 @@ def test_cli_passes_requested_planning_limits_before_running_task(monkeypatch):
             "sam3_reference",
             "--motion-timeout-s",
             "2",
-            "--placement-support-tolerance-m",
-            "0.002",
-            "--placement-xy-tolerance-m",
-            "0.007",
             "--motion-position-tolerance-m",
             "0.005",
             "--motion-rotation-tolerance",
             "0.05",
-            "--release-clearance-m",
-            "0.015",
+            "--approach-distance-m",
+            "0.2",
+            "--lift-distance-m",
+            "0.06",
+            "--lift-hold-s",
+            "1.5",
+            "--approach-speed-factor",
+            "0.6",
+            "--descend-far-speed-factor",
+            "0.5",
+            "--descend-near-speed-factor",
+            "0.4",
+            "--lift-speed-factor",
+            "0.7",
+            "--home-speed-factor",
+            "0.65",
         ],
     )
     runner.main()
     settings = captured[0]
     assert settings.motion_timeout_s == 2
-    assert settings.placement_support_tolerance_m == 0.002
-    assert settings.placement_xy_tolerance_m == 0.007
     assert settings.motion_position_tolerance_m == 0.005
     assert settings.motion_rotation_tolerance == 0.05
-    assert settings.release_clearance_m == 0.015
+    assert settings.approach_distance_m == .2
+    assert settings.lift_distance_m == .06
+    assert settings.lift_hold_s == 1.5
+    assert settings.approach_speed_factor == .6
+    assert settings.descend_far_speed_factor == .5
+    assert settings.descend_near_speed_factor == .4
+    assert settings.lift_speed_factor == .7
+    assert settings.home_speed_factor == .65
     # Invalid height budgets fail before entering perception or planning.
-    monkeypatch.setattr(sys, "argv", ["run_known_pick_place", "--release-clearance-m", "0.003"])
+    monkeypatch.setattr(sys, "argv", ["run_known_pick_place", "--lift-distance-m", "0.003"])
+    with pytest.raises(SystemExit) as error:
+        runner.main()
+    assert error.value.code == 2 and len(captured) == 1
+    monkeypatch.setattr(sys, "argv", ["run_known_pick_place", "--lift-speed-factor", "1.01"])
+    with pytest.raises(SystemExit) as error:
+        runner.main()
+    assert error.value.code == 2 and len(captured) == 1
+    monkeypatch.setattr(sys, "argv", ["run_known_pick_place", "--approach-distance-m", "0.04"])
     with pytest.raises(SystemExit) as error:
         runner.main()
     assert error.value.code == 2 and len(captured) == 1

@@ -16,22 +16,33 @@ from tiptop.perception_wrapper import run_visual_perception
 @pytest.mark.parametrize(
     "instruction",
     [
-        "black_pepper_shaker를 집고 빈곳에 놓아",
-        "`black_pepper_shaker` 집고 빈 곳에 놓아.",
-        "black_pepper_shaker를 집어서 빈 곳에 놓아줘",
+        "black_pepper_shaker를 집고 제자리에 놓아",
+        "`black_pepper_shaker` 집고 제 자리에 놓아.",
+        "black_pepper_shaker를 집어서 제 자리에 놓아줘",
+        "black_pepper_shaker를 집고 들어올렸다가 제자리에 놓아",
+        "black_pepper_shaker를 집고 제자리로 놓아줘",
+        "black_pepper_shaker를 집고 제자리에 놓아",
     ],
 )
 def test_explicit_reference_instruction(instruction):
     assert reference.parse_reference_task(instruction) == "black_pepper_shaker"
 
 
+@pytest.mark.parametrize("class_id", ["spam_classic_20G_can", "grip_strengthener_30KG"])
+def test_class_id_with_uppercase_is_parsed_verbatim(class_id):
+    assert reference.parse_reference_task(f"{class_id} 집고 제자리에 놓아") == class_id
+
+
 @pytest.mark.parametrize(
     "instruction",
     [
-        "not_registered를 집고 빈곳에 놓아",
-        "후추통을 집고 빈곳에 놓아",
+        "not_registered를 집고 제자리에 놓아",
+        "SPAM_classic_20G_can을 집고 제자리에 놓아",
+        "후추통을 집고 제자리에 놓아",
         "black_pepper_shaker를 집어",
         "black_pepper_shaker를 집고 병 옆에 놓아",
+        "black_pepper_shaker를 집고 상자에 놓아",
+        "black_pepper_shaker를 집고 빈곳에 놓아",
     ],
 )
 def test_unsupported_instruction_fails_without_guessing(instruction):
@@ -116,7 +127,7 @@ def test_reference_frontend_uses_each_current_image_without_gemini_or_sam2(monke
                 Session(),
                 frame,
                 np.eye(4),
-                "black_pepper_shaker를 집고 빈곳에 놓아",
+                "black_pepper_shaker를 집고 제자리에 놓아",
                 perception_mode="sam3_reference",
             )
         )

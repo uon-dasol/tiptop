@@ -30,6 +30,7 @@ from scipy.spatial import KDTree
 from tiptop.config import load_calibration, tiptop_cfg
 from tiptop.execute_plan import execute_cutamp_plan
 from tiptop.motion_planning import build_curobo_solvers, go_to_capture
+from tiptop.perception.cad_cache import load_cad_mesh
 from tiptop.perception.cameras import (
     Camera,
     DepthEstimator,
@@ -41,6 +42,12 @@ from tiptop.perception.cameras import (
 )
 from tiptop.perception.cameras.geometry import camera_world_pose
 from tiptop.perception.m2t2 import generate_grasps_async, m2t2_to_tiptop_transform
+from tiptop.perception.placement import (
+    TABLE_BOX_LOWERING_M,
+    TABLE_SUPPORT_MODES,
+    check_support_gap,
+    table_support_z,
+)
 from tiptop.perception.sam2 import sam2_client
 from tiptop.perception.segmentation import (
     masked_object_points,
@@ -118,6 +125,7 @@ class ProcessedScene:
     object_pcds: dict[str, o3d.geometry.PointCloud]
     grasps: dict[str, dict]  # Label -> grasp data with tensor versions
     perception_results: dict | None = None
+    table_support: dict | None = None  # Mode, support height and per-target CAD-bottom gap of known-DB scenes
 
 
 def capture_live_observation(container: _DemoContainer) -> Observation:
@@ -344,6 +352,14 @@ def create_tamp_environment(
     return env, all_surfaces
 
 
+def declared_table_cuboid(declared: Cuboid) -> Cuboid:
+    """Table box from a configured table, lowered like the RANSAC box so both feed the same support-plane logic."""
+    pose, dims = np.asarray(declared.pose, float), np.asarray(declared.dims, float)
+    if abs(pose[3]) < 1 - 1e-9:
+        raise ValueError(f"Configured table {declared.name} must be axis-aligned")
+    return Cuboid(name="table", dims=dims.tolist(), pose=[pose[0], pose[1], pose[2] - TABLE_BOX_LOWERING_M, 1, 0, 0, 0])
+
+
 def process_scene_geometry(
     xyz_map: np.ndarray,
     rgb_map: np.ndarray,
@@ -353,6 +369,8 @@ def process_scene_geometry(
     recgen_meshes: dict[str, trimesh.Trimesh] | None = None,
     *,
     registered_grasps: dict | None = None,
+    table_support: str = "ransac-cad",
+    declared_table: Cuboid | None = None,
 ) -> ProcessedScene:
     """Process perception results into 3D scene geometry for TAMP.
 
@@ -363,23 +381,39 @@ def process_scene_geometry(
         bboxes: Bounding boxes from Gemini
         grasps: Grasp predictions from M2T2
         recgen_meshes: Per-object meshes in world frame (e.g. from RecGen). When provided, replaces the convex-hull path.
+        table_support: "ransac-cad" scores RANSAC planes with the posed-CAD bottoms (default), "ransac-mask" with the
+            mask-bottom points, "declared" skips RANSAC and uses `declared_table`, which then also needs the CAD-bottom
+            gap check that the 3 cm RANSAC contact threshold otherwise provides.
 
     Returns:
         ProcessedScene with table cuboid, object meshes, pcds, and filtered grasps
     """
-    # Segment table with RANSAC (returns trimesh Box)
-    table_options = {}
-    if registered_grasps and all("support_point_world" in item for item in registered_grasps.values()):
-        table_options["support_points_world"] = np.stack(
-            [item["support_point_world"] for item in registered_grasps.values()]
-        )
-    table_trimesh = segment_table_with_ransac(xyz_map, rgb_map, masks, **table_options)
-    table_cuboid = convert_trimesh_box_to_curobo_cuboid(table_trimesh, name="table")
+    if table_support not in TABLE_SUPPORT_MODES:
+        raise ValueError(f"Unknown table support {table_support!r}; choose one of {TABLE_SUPPORT_MODES}")
+    if table_support == "declared":
+        if declared_table is None:
+            raise ValueError("Table support 'declared' needs a configured full table")
+        table_cuboid = declared_table_cuboid(declared_table)
+        table_box_top_z = float(table_cuboid.pose[2] + table_cuboid.dims[2] / 2)
+    else:
+        # Segment table with RANSAC (returns trimesh Box)
+        table_options = {}
+        if (
+            table_support == "ransac-cad"
+            and registered_grasps
+            and all("support_point_world" in item for item in registered_grasps.values())
+        ):
+            table_options["support_points_world"] = np.stack(
+                [item["support_point_world"] for item in registered_grasps.values()]
+            )
+        table_trimesh = segment_table_with_ransac(xyz_map, rgb_map, masks, **table_options)
+        table_cuboid = convert_trimesh_box_to_curobo_cuboid(table_trimesh, name="table")
+        table_box_top_z = float(table_trimesh.bounds[1, 2])
     log_curobo_mesh_to_rerun("world/table", table_cuboid.get_mesh(), static_transform=True)
 
     # For filtering to table plane height
     config = TAMPConfiguration()
-    table_top_z = table_trimesh.bounds[1, 2] + config.world_activation_distance + config.coll_sphere_radius * 2
+    table_top_z = table_box_top_z + config.world_activation_distance + config.coll_sphere_radius * 2
     if recgen_meshes is not None:
         # Derive each object's point cloud from its mask, then apply the same table-relative z-filter + outlier removal
         # the convex-hull path uses. Drop objects with too few above-table points. Keep object_trimeshes in sync with
@@ -424,6 +458,20 @@ def process_scene_geometry(
         # DB output already contains model TCP poses in the world frame. Applying
         # the Panda/M2T2 correction below would corrupt those transforms.
         object_meshes = {label: convert_trimesh_to_curobo_mesh(mesh, label) for label, mesh in object_trimeshes.items()}
+        support_z = table_support_z(table_box_top_z)
+        if table_support == "ransac-cad":
+            # The RANSAC contact threshold already rejects far-off poses; the gap is only recorded.
+            support_gaps = {
+                label: float(item["support_point_world"][2] - support_z)
+                for label, item in registered_grasps.items()
+                if "support_point_world" in item
+            }
+        else:
+            support_gaps = {
+                label: check_support_gap(label, item["support_point_world"][2], support_z)
+                for label, item in registered_grasps.items()
+            }
+        table_info = dict(mode=table_support, support_z_m=support_z, cad_bottom_gap_m=support_gaps)
         supplied = {}
         for label, result in registered_grasps.items():
             if label not in object_meshes:
@@ -436,7 +484,7 @@ def process_scene_geometry(
                 confidences_pt=tensor_args.to_device(data["scores"]),
                 registered=result,
             )
-        return ProcessedScene(table_cuboid, object_meshes, object_pcds, supplied)
+        return ProcessedScene(table_cuboid, object_meshes, object_pcds, supplied, table_support=table_info)
 
     # Associate grasps with objects by checking contact point proximity
     # Build a single KDTree from all object points with label tracking
@@ -575,12 +623,21 @@ async def run_perception(
     grasp_provider: str | None = None,
     client=None,
     active_task=None,
-    empty_place: bool = False,
+    in_place_return=False,
     registered_grasp_from_tcp=None,
     perception_mode=None,
     sam3_url=None,
     reference_scene=None,
+    pick_place_bounds_xy=None,
+    cad_mask_min_iou=0.75,
+    preview=None,
+    background_tasks: list | None = None,
+    table_support: str = "ransac-cad",
+    declared_table: Cuboid | None = None,
 ) -> tuple[TAMPEnvironment, list, ProcessedScene, list[dict]]:
+    """Run perception. With `background_tasks`, saving outputs is appended there instead of awaited."""
+    if background_tasks is not None and log_to_rerun:
+        raise ValueError("log_to_rerun needs the saved visualizations, so it cannot defer saving")
     start_time = time.perf_counter()
 
     cfg = tiptop_cfg()
@@ -611,6 +668,7 @@ async def run_perception(
         perception_mode=perception_mode,
         sam3_url=sam3_url,
         reference_scene=reference_scene,
+        on_update=None if preview is None else preview.update,
     )
     save_dir.mkdir(parents=True, exist_ok=True)
     (save_dir / "semantic-task.json").write_text(
@@ -651,6 +709,7 @@ async def run_perception(
                 server_url=cfg.perception.get("foundation_pose_url", "http://127.0.0.1:13346"),
                 world_from_planner_object=np.eye(4),
                 grasp_from_tcp=np.eye(4) if registered_grasp_from_tcp is None else registered_grasp_from_tcp,
+                cad_mask_min_iou=cad_mask_min_iou,
             )
         }
         results["grasps"] = {}
@@ -667,6 +726,11 @@ async def run_perception(
             )
             + "\n"
         )
+        if preview is not None:
+            await asyncio.to_thread(
+                preview.grasps, registered_grasps[label]["grasps"], observation.world_from_cam, frame.intrinsics,
+                max_tilt_deg=preview.max_tilt_deg,
+            )
     else:
         raise ValueError(f"Unknown grasp provider: {provider}")
     _log.info(f"Capturing observation and running perception APIs took {time.perf_counter() - start_time:.2f}s")
@@ -720,51 +784,36 @@ async def run_perception(
         results["grasps"],
         recgen_meshes=recgen_meshes,
         registered_grasps=registered_grasps,
+        table_support=table_support,
+        declared_table=declared_table,
     )
-    processed_scene, save_result = await asyncio.gather(process_coroutine, save_future)
+    if background_tasks is None:
+        processed_scene, save_result = await asyncio.gather(process_coroutine, save_future)
+    else:
+        background_tasks.append(save_future)
+        processed_scene = await process_coroutine
     processed_scene.perception_results = results
 
-    if empty_place:
+    if in_place_return:
         if provider != "known_db":
-            raise ValueError("Observed empty-place mode currently requires a known CAD footprint")
-        from tiptop.perception.known_objects import registered_target
-        from tiptop.perception.placement import select_observed_free_region
+            raise ValueError("In-place return requires a known CAD target")
+        from tiptop.doosan.in_place import source_region
+        from tiptop.perception.known_objects import registered_target, require_return_in_place
 
+        if results["semantic_source"] == "gemini":
+            require_return_in_place(results["grounded_atoms"])
         label, entry = registered_target(results["bboxes"], results["grounded_atoms"])
-        if results["grounded_atoms"] != [{"predicate": "on", "args": [label, "table"]}]:
-            raise ValueError("Empty-place mode requires exactly one on(target, table) goal")
         estimate = processed_scene.grasps[label]["registered"]["pose"]["world_from_cad"]
-        vertices = trimesh.load(entry["cad"], force="mesh", process=False).vertices * entry["cad_scale_to_m"]
+        vertices = load_cad_mesh(entry["cad"], entry["cad_scale_to_m"]).vertices
         vertices = vertices @ estimate[:3, :3].T + estimate[:3, 3]
-        center = (vertices.min(0) + vertices.max(0)) / 2
-        footprint = float(np.linalg.norm(vertices[:, :2] - center[:2], axis=1).max())
-        placement_options = dict(
-            table_bounds=(
-                np.asarray(processed_scene.table_cuboid.pose[:3])
-                + np.array([-0.5, 0.5])[:, None] * np.asarray(processed_scene.table_cuboid.dims)
-            ),
-            target_center=center,
-            footprint_radius=footprint,
-            footprint_size_xy=np.ptp(vertices[:, :2], axis=0),
-        )
-        (save_dir / "placement-input.json").write_text(json.dumps(placement_options, cls=NumpyEncoder, indent=2) + "\n")
-        region = select_observed_free_region(results["xyz_map"], **placement_options)
-        # Mask segmentation crops off some bottom points. Compensate that crop
-        # using the camera-estimated CAD bottom, not a simulator ground truth pose.
-        target_mesh = processed_scene.object_meshes[label]
-        partial_bottom = float(np.asarray(target_mesh.vertices)[:, 2].min() + target_mesh.pose[2])
-        crop = max(0.0, partial_bottom - float(vertices[:, 2].min()))
-        top = region["support_z_m"] + crop + 0.003
-        surface = Cuboid(
-            name="observed_empty_region",
-            dims=[*region["size_xy_m"], 0.004],
-            pose=[*region["center_xy_m"], top - 0.002, 1, 0, 0, 0],
-        )
-        region.update(partial_bottom_correction_m=crop, release_clearance_m=0.003, planning_surface_top_z_m=top)
-        results["empty_region"] = region
-        processed_scene.object_meshes[surface.name] = surface
-        results["grounded_atoms"] = [{"predicate": "on", "args": [label, surface.name]}]
-        (save_dir / "empty-region.json").write_text(json.dumps(region, indent=2) + "\n")
+        table_bounds = (np.asarray(processed_scene.table_cuboid.pose[:3])
+                        + np.array([-.5, .5])[:, None]*np.asarray(processed_scene.table_cuboid.dims))
+        results["placement_region"] = source_region(table_bounds, vertices, pick_place_bounds_xy)
+        results["placement_region"]["table_support"] = processed_scene.table_support
+        if preview is not None:
+            await asyncio.to_thread(preview.side_scene, vertices, results["placement_region"]["support_z_m"], observation.world_from_cam)
+        results["grounded_atoms"] = [{"predicate": "holding", "args": [label]}]
+        (save_dir / "placement-region.json").write_text(json.dumps(results["placement_region"], indent=2)+"\n")
 
     if log_to_rerun:
         bbox_viz, masks_viz = save_result

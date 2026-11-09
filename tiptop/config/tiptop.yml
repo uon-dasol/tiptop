@@ -90,3 +90,7 @@ experimental:
   # Placement distance tolerances default to cuTAMP's NearPlacement value of 5cm (5e-2).
   # See default_constraint_to_tol in https://github.com/tiptop-robot/cuTAMP/blob/main/cutamp/scripts/utils.py
   pick_place_next_to: false
+
+  # Lets Gemini translate "put it back in place" into return_in_place(x), the pick, lift and release preset of
+  # run_known_pick_place. That script switches it on in Gemini mode.
+  return_in_place: false
