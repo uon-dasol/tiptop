@@ -1,0 +1,12 @@
+{
+  "name": "lab_right_table_home",
+  "status": "user_selected_home",
+  "joint_names": ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"],
+  "joint_positions_deg": [94.57377625, -18.4128685, 94.60267639, 2.26957488, 104.51325989, -4.50325346],
+  "model_tcp_base_xyz_m": [-0.07533459, 0.33757803, 0.51652164],
+  "gripper_mount_yaw_deg": -90.0,
+  "physical_home_verified": false,
+  "transition_path_verified": false,
+  "source": "User-provided GetCurrentPosj response on 2026-10-29; selected as the common lab simulation home by the user.",
+  "note": "Arm home for --lab startup, facing the Right table from the centre-table side. Controller home registration and travel to/from this pose are not verified. Open gripper is used at simulation startup; actual motor-count/model-angle mapping remains uncalibrated."
+}

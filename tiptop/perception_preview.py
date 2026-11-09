@@ -452,10 +452,14 @@ def preview_saved_task(output):
             entry = registered_object(pose["class_id"])
             rows = json.loads(entry["db"].read_text())["data"]
             order = np.argsort(-np.asarray([row["score"] for row in rows]), kind="stable")
-            grasp_from_tcp = np.eye(4)
+            grasp_from_tcp = (plan or {}).get("db_grasp_from_tcp")
             profile = (plan or {}).get("hardware_profile")
-            if profile and Path(profile).is_file():
+            if grasp_from_tcp is None and profile and Path(profile).is_file():
                 grasp_from_tcp = np.asarray(json.loads(Path(profile).read_text())["tool"]["db_grasp_from_tcp"])
+            if grasp_from_tcp is None:
+                preparation = json.loads(str(observation.get("camera_preparation", "{}")))
+                grasp_from_tcp = preparation.get("db_grasp_from_tcp", np.eye(4))
+            grasp_from_tcp = np.asarray(grasp_from_tcp, float)
             world_tcp = np.asarray(pose["pose"]["world_from_cad"]) @ np.asarray([rows[i]["grasp_mat"] for i in order]) @ grasp_from_tcp
             preview.grasps(dict(world_from_tcp=world_tcp, candidate_indices=order, scores=[rows[i]["score"] for i in order]),
                            observation["world_from_cam"], observation["intrinsics"],

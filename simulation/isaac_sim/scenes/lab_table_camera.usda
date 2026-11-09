@@ -1,0 +1,107 @@
+#usda 1.0
+(
+    subLayers = [@lab_table_camera_optics.usda@]
+    metersPerUnit = 1
+    upAxis = "Z"
+    documentation = "Lab Gemini 336L body, bracket and SDK-derived optical camera views. User reports front glass102cm above the tabletop. Body placement is approximate; factory optics are in lab_table_camera_optics.usda. Does not reconfigure the separate live perception runtime."
+)
+
+over "World"
+{
+    over "FixedStructures"
+    {
+        def Xform "gemini336l_mount" (
+            displayName = "Gemini 336L - front at 102 cm, provisional hanging bracket"
+            documentation = "X=-0.01 is 1cm toward world -X from the78cm table width centre. Y=0.76 is 3cm from the Center-side edge (Y=0.73) and 5cm from the Right-side edge (Y=0.81) of the robot-facing 8cm upper beam. Body front looks down, long axis is world X, rotateZ=180. RGB180/Depth180 show the user-confirmed view from the Right end; Raw views preserve the native image orientation. Front-to-frame distance15.5cm includes the2.77cm body. World mounting is estimated, not a measured base-to-camera calibration."
+        )
+        {
+            double3 xformOp:translate = (-0.01, 0.76, 1.02)
+            double xformOp:rotateZ = 180
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
+
+            def Cube "CameraBody" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+                displayName = "Gemini 336L body envelope - 124 x 29 x 27.7 mm"
+            )
+            {
+                double size = 1
+                bool physics:collisionEnabled = true
+                color3f[] primvars:displayColor = [(0.12, 0.14, 0.17)]
+                double3 xformOp:translate = (0, 0, 0.01385)
+                double3 xformOp:scale = (0.124, 0.029, 0.0277)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "BracketCameraPlate" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+                displayName = "Provisional camera mounting plate - 70 x 35 x 4 mm"
+            )
+            {
+                double size = 1
+                bool physics:collisionEnabled = true
+                color3f[] primvars:displayColor = [(0.6, 0.62, 0.65)]
+                double3 xformOp:translate = (0, 0, 0.0297)
+                double3 xformOp:scale = (0.07, 0.035, 0.004)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "BracketStem" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+                displayName = "Provisional hanging stem - 20 x 20 x 119.3 mm"
+            )
+            {
+                double size = 1
+                bool physics:collisionEnabled = true
+                color3f[] primvars:displayColor = [(0.5, 0.52, 0.55)]
+                double3 xformOp:translate = (0, 0, 0.09135)
+                double3 xformOp:scale = (0.02, 0.02, 0.1193)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            def Cube "BracketFramePlate" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+                displayName = "Provisional frame mounting plate - 60 x 60 x 4 mm"
+            )
+            {
+                double size = 1
+                bool physics:collisionEnabled = true
+                color3f[] primvars:displayColor = [(0.6, 0.62, 0.65)]
+                double3 xformOp:translate = (0, 0, 0.153)
+                double3 xformOp:scale = (0.06, 0.06, 0.004)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            }
+
+            # Shallow, visual-only lens markers identify the downward-facing side.
+            # Their centres/appearance are schematic, not an optical calibration.
+            def Cylinder "LeftIRMarker"
+            {
+                uniform token axis = "Z"
+                double radius = 0.0045
+                double height = 0.0004
+                color3f[] primvars:displayColor = [(0.08, 0.3, 0.45)]
+                double3 xformOp:translate = (0.047678250819444656, 0, -0.0002)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
+
+            def Cylinder "RightIRMarker"
+            {
+                uniform token axis = "Z"
+                double radius = 0.0045
+                double height = 0.0004
+                color3f[] primvars:displayColor = [(0.08, 0.3, 0.45)]
+                double3 xformOp:translate = (-0.047678250819444656, 0, -0.0002)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
+
+            def Cylinder "RGBMarker"
+            {
+                uniform token axis = "Z"
+                double radius = 0.004
+                double height = 0.0004
+                color3f[] primvars:displayColor = [(0.12, 0.42, 0.6)]
+                double3 xformOp:translate = (0.02375, 0, -0.0002)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
+        }
+    }
+}

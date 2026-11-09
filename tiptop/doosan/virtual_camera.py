@@ -30,6 +30,8 @@ def load_camera_preparation(source):
     document = deepcopy(source) if isinstance(source, dict) else json.loads(Path(source).read_text())
     if document.get("success", True) is not True:
         raise ValueError("Camera preparation reports failure")
+    if "db_grasp_from_tcp" in document:
+        document["db_grasp_from_tcp"] = _rigid_transform(document["db_grasp_from_tcp"], "db_grasp_from_tcp").tolist()
     profile = document["profile"]
     mount = profile.setdefault("mount", "wrist")
     if mount not in {"wrist", "fixed"}:

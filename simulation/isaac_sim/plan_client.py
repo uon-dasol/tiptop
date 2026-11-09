@@ -195,10 +195,21 @@ class IsaacPlanClient:
         return self._gripper('close', speed, force)
 
 
-def replay_plan(app, plan, *, realtime, report):
+def replay_plan(app, plan, *, realtime, report, initialize=False):
     from tiptop.execute_plan import execute_cutamp_plan
 
     client = IsaacPlanClient(app, realtime=realtime)
+    if initialize:
+        # Offline simulator initialization only; never a command to a physical robot.
+        initial = dict(zip(JOINT_NAMES, plan['q_init']))
+        initial.update(spinner_joint=client.open_angle, f1_joint=0., f2_joint=0., f3_joint=0.)
+        client.robot.set_link_enabled_gravities(False)
+        client.robot.set_dof_positions([initial[name] for name in client.names])
+        client.robot.set_dof_velocities([0.] * len(client.names))
+        client.robot.set_dof_position_targets(
+            [initial[client.names[i]] for i in client.controlled], dof_indices=client.controlled)
+        for _ in range(30):
+            client._tick()
     report.update(backend='isaac_sim', physical_grasp_verified=False, completed_steps=0,
                   calls=client.calls, requested_trajectory_duration_s=sum(
                       len(s['positions']) * s['dt'] for s in plan['steps'] if s['type'] == 'trajectory'))

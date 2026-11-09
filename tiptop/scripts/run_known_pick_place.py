@@ -246,6 +246,10 @@ async def run(args):
             return np.where(inside, 0, depth)
 
         active = json.loads(args.active_task.read_text()) if args.active_task else None
+        grasp_from_tcp = (
+            np.asarray(camera_preparation.get("db_grasp_from_tcp", np.eye(4)), float)
+            if hardware is None else hardware["grasp_from_tcp"]
+        )
         args._stage = "perception"
         timing.phase("perception")
         client = None
@@ -281,7 +285,7 @@ async def run(args):
                 client=client,
                 active_task=active,
                 in_place_return=True,
-                registered_grasp_from_tcp=None if hardware is None else hardware["grasp_from_tcp"],
+                registered_grasp_from_tcp=grasp_from_tcp,
                 cad_mask_min_iou=getattr(args, "cad_mask_min_iou", 0.75),
                 table_support=table_support,
                 declared_table=declared_table,
@@ -393,6 +397,7 @@ async def run(args):
             semantic_source=semantic["semantic_source"],
             hardware_profile=None if profile_path is None else str(Path(profile_path).resolve()),
             hardware_profile_sha256=fingerprint,
+            db_grasp_from_tcp=np.asarray(grasp_from_tcp).tolist(),
             robot_system=0 if hardware is not None else 1,
         )
         if hardware is None:

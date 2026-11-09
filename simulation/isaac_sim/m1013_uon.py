@@ -57,7 +57,35 @@ def model_fk(positions, target='link_6'):
     raise ValueError(f'Cannot resolve {target} in {MODEL}')
 
 
-def build_stage(output):
+def align_gripper_spinner(stage):
+    """Apply the planning URDF's spinner origin to the referenced USD assembly.
+
+    The vendor USD stores rotor/finger meshes in the body frame. Rotate those
+    rigid bodies together and update the body-side joint anchor; leave the
+    source asset, motor zero, mimic joints and body/flange mount intact.
+    """
+    from pxr import Gf, UsdGeom, UsdPhysics
+
+    origin = ET.parse(MODEL).getroot().find("joint[@name='gripper_spinner_joint']/origin")
+    xyz = [float(v) for v in origin.get('xyz').split()]
+    rpy = [float(v) for v in origin.get('rpy', '0 0 0').split()]
+    joint = UsdPhysics.Joint(stage.GetPrimAtPath(GRIPPER + '/joints/spinner_joint'))
+    old_anchor = Gf.Matrix4d().SetRotate(Gf.Quatd(joint.GetLocalRot0Attr().Get()))
+    old_anchor.SetTranslateOnly(Gf.Vec3d(joint.GetLocalPos0Attr().Get()))
+    new_anchor = pose(xyz, rpy)
+    cache = UsdGeom.XformCache()
+    body_world = cache.GetLocalToWorldTransform(stage.GetPrimAtPath(GRIPPER + '/body'))
+    correction = body_world.GetInverse() * old_anchor.GetInverse() * new_anchor * body_world
+    for name in ('spinner', 'finger1', 'finger2', 'finger3'):
+        prim = stage.GetPrimAtPath(GRIPPER + '/' + name)
+        local = (cache.GetLocalToWorldTransform(prim) * correction
+                 * cache.GetLocalToWorldTransform(prim.GetParent()).GetInverse())
+        UsdGeom.Xformable(prim).MakeMatrixXform().Set(local)
+    joint.CreateLocalPos0Attr(Gf.Vec3f(*xyz))
+    joint.CreateLocalRot0Attr(Gf.Quatf(new_anchor.ExtractRotationQuat()))
+
+
+def build_stage(output, *, align_spinner=False):
     import omni.usd
     import yaml
     from pxr import Gf, Usd, UsdGeom, UsdLux, UsdPhysics, PhysxSchema
@@ -78,6 +106,8 @@ def build_stage(output):
     # Deliberately preserve those values, including physical attributes.
     UsdGeom.Xform.Define(stage, '/World/Arm').GetPrim().GetReferences().AddReference(str(ARM_ASSET))
     UsdGeom.Xform.Define(stage, '/World/Gripper').GetPrim().GetReferences().AddReference(str(GRIPPER_ASSET))
+    if align_spinner:
+        align_gripper_spinner(stage)
     wrist = stage.GetPrimAtPath(ARM + '/link_6')
     body = stage.GetPrimAtPath(GRIPPER + '/body')
     if not (wrist.HasAPI(UsdPhysics.RigidBodyAPI) and body.HasAPI(UsdPhysics.RigidBodyAPI)):
@@ -235,6 +265,7 @@ def main():
     parser.add_argument('--headless', action='store_true')
     parser.add_argument('--check', action='store_true', help='Run the selected check, write result, and exit')
     parser.add_argument('--plan', type=Path, help='Replay an existing TiPToP M1013 plan with the existing executor')
+    parser.add_argument('--lab', action='store_true', help='Use the saved lab table, structures and camera geometry')
     parser.add_argument('--snapshot', action='store_true', help='Save a preview PNG after the motion check')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
@@ -280,6 +311,45 @@ def main():
 
         viewport = get_active_viewport()
         viewport.camera_path = '/World/Camera'
+        if args.lab:
+            from lab_scene import attach_lab_environment, saved_view_transform
+            from pxr import UsdGeom
+
+            stage = omni.usd.get_context().get_stage()
+            report['lab_environment'] = attach_lab_environment(stage)
+            # Preserve the user's saved overview without replacing the controllable robot.
+            view = ROOT / 'simulation/isaac_sim/scenes/lab_pick_view.usda'
+            if view.is_file():
+                UsdGeom.Xformable(stage.GetPrimAtPath('/World/Camera')).MakeMatrixXform().Set(
+                    saved_view_transform(view))
+            report['lab_environment']['table_bounds'] = report['lab_environment']['table_bounds'].tolist()
+        if plan is not None:
+            # Show the exact CAD frame used by perception/planning, rather than
+            # a separate USD asset whose object origin may differ.
+            import numpy as np
+            import trimesh
+            from pxr import Gf, UsdGeom
+            from tiptop.object_catalog import registered_object
+
+            pose_path = args.plan.resolve().parent / 'registered-pose.json'
+            registered = json.loads(pose_path.read_text())
+            if registered['class_id'] != plan['class_id']:
+                raise ValueError('Saved target pose does not match the plan class')
+            entry = registered_object(plan['class_id'])
+            mesh = trimesh.load(entry['cad'], force='mesh', process=False)
+            transform = np.asarray(registered['pose']['world_from_cad'], float)
+            vertices = np.asarray(mesh.vertices) * entry['cad_scale_to_m']
+            vertices = vertices @ transform[:3, :3].T + transform[:3, 3]
+            stage = omni.usd.get_context().get_stage()
+            target = UsdGeom.Mesh.Define(stage, '/World/PlannedTarget')
+            target.CreatePointsAttr([Gf.Vec3f(*p) for p in vertices])
+            target.CreateFaceVertexCountsAttr([3] * len(mesh.faces))
+            target.CreateFaceVertexIndicesAttr(mesh.faces.reshape(-1).tolist())
+            target.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
+            target.CreateDoubleSidedAttr(True)
+            target.CreateDisplayColorAttr([Gf.Vec3f(.65, .8, .95)])
+            report['target'] = dict(class_id=plan['class_id'], pose_source=str(pose_path),
+                                    visual_only=True, contact_grasp_verified=False)
         if plan is None:
             report.update(check_motion(app, mount))
         else:
@@ -288,7 +358,7 @@ def main():
 
             logging.basicConfig(level=logging.INFO)
             report['plan'] = str(args.plan.resolve())
-            replay_plan(app, plan, realtime=not args.headless, report=report)
+            replay_plan(app, plan, realtime=not args.headless, report=report, initialize=True)
         if args.snapshot:
             import asyncio
             from omni.kit.viewport.utility import capture_viewport_to_file

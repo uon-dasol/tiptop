@@ -1,0 +1,584 @@
+#usda 1.0
+(
+    customLayerData = {
+        dictionary cameraSettings = {
+            dictionary Front = {
+                double3 position = (5, 0, 0)
+                double radius = 5
+            }
+            dictionary Perspective = {
+                double3 position = (-3.0683715587779963, 0.09626901980653778, 0.44596854336827607)
+                double3 target = (15.613071247384465, 5.420505376735913, 1.9504797971364296)
+            }
+            dictionary Right = {
+                double3 position = (-1.025579472613159, -5, 1.2196080214859188)
+                double radius = 5.260945510864258
+            }
+            dictionary Top = {
+                double3 position = (0, 0, 5)
+                double radius = 5
+            }
+            string boundCamera = "/OmniverseKit_Persp"
+        }
+        dictionary omni_layer = {
+            string authoring_layer = "./lab_table_gripper_view.usda"
+            dictionary locked = {
+            }
+            dictionary muteness = {
+            }
+        }
+        dictionary renderSettings = {
+        }
+    }
+    defaultPrim = "World"
+    doc = "Lab table draft: world axes match robot base_link. X width 78 cm, Y length 250 cm; Y sections 80.5 / 89 / 80.5 cm. Provisional thickness 3 cm. Robot mounting face and tabletop are Z=0; cable side is -Y. Layout preview only."
+    metersPerUnit = 1
+    subLayers = [
+        @lab_table_keepout.usda@
+    ]
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def Xform "Table" (
+        displayName = "Table X 78 cm x Y 250 cm"
+    )
+    {
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+
+        def Cube "Left" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+            displayName = "Negative Y section: X 78 cm x Y 80.5 cm"
+        )
+        {
+            color3f[] primvars:displayColor = [(0.58, 0.48, 0.36)]
+            double size = 1
+            double3 xformOp:scale = (0.78, 0.805, 0.03)
+            double3 xformOp:translate = (0, -0.8475, -0.015)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "Center" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+            displayName = "Center: X 78 cm x Y 89 cm - robot mounting surface"
+        )
+        {
+            color3f[] primvars:displayColor = [(0.68, 0.58, 0.44)]
+            double size = 1
+            double3 xformOp:scale = (0.78, 0.89, 0.03)
+            double3 xformOp:translate = (0, 0, -0.015)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "Right" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+            displayName = "Positive Y section: X 78 cm x Y 80.5 cm"
+        )
+        {
+            color3f[] primvars:displayColor = [(0.58, 0.48, 0.36)]
+            double size = 1
+            double3 xformOp:scale = (0.78, 0.805, 0.03)
+            double3 xformOp:translate = (0, 0.8475, -0.015)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+    }
+
+    def Xform "Robot" (
+        prepend references = @../../../ros2_ws/src/drivers/manipulator/doosan-robot2/dsr_description2/usd/m1013.usd@
+    )
+    {
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+
+        over "m1013"
+        {
+            over "tool0"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (0.5808259152699553, 0.49508374814918327, 0.42046400807404766, -0.49065604692460685)
+                double3 xformOp:translate = (0.02153007686138153, 0.44274505972862244, 0.349698543548584)
+            }
+
+            over "link_6"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (-0.003130841704265286, 0.7080189362575134, -0.6970232505497792, 0.11339299768513843)
+                double3 xformOp:translate = (0.021530166268348694, 0.4427451491355896, 0.349698543548584)
+
+                over "collisions"
+                {
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "link_4"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (-0.3799989509283827, 0.6565976272426768, -0.5844279642968935, -0.28796581001987837)
+                double3 xformOp:translate = (0.001598060131072998, 0.46133649349212646, 0.46758919954299927)
+
+                over "collisions"
+                {
+                    over "mesh_0"
+                    {
+                        rel physics:simulationOwner
+                    }
+
+                    over "mesh_1"
+                    {
+                        rel physics:simulationOwner
+                    }
+                }
+
+                over "joint_5"
+                {
+                    float drive:angular:physics:targetPosition = 65.53979
+                    float physics:lowerLimit = -360
+                    float physics:upperLimit = 360
+                    float state:angular:physics:position = 65.55487
+                    float state:angular:physics:velocity = 0
+                }
+            }
+
+            over "link_3"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (-0.17435936806351052, -0.6695614661647465, 0.22757235864528721, 0.6851985663852699)
+                double3 xformOp:translate = (-0.0351870059967041, -0.005774840712547302, 0.7724418044090271)
+
+                over "collisions"
+                {
+                    rel physics:simulationOwner
+                }
+
+                over "joint_4"
+                {
+                    float drive:angular:physics:targetPosition = -11.147777
+                    float physics:lowerLimit = -360
+                    float physics:upperLimit = 360
+                    float state:angular:physics:position = -11.151605
+                    float state:angular:physics:velocity = 0
+                }
+            }
+
+            over "link_2"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (-0.7062839576603601, 0.02288504689374372, 0.7068083880610007, 0.03257527201574225)
+                double3 xformOp:translate = (-0.03439444303512573, 0.0026969462633132935, 0.1525000035762787)
+
+                over "collisions"
+                {
+                    over "mesh_0"
+                    {
+                        rel physics:simulationOwner
+                    }
+
+                    over "mesh_1"
+                    {
+                        rel physics:simulationOwner
+                    }
+
+                    over "mesh_2"
+                    {
+                        rel physics:simulationOwner
+                    }
+                }
+
+                over "joint_3"
+                {
+                    float drive:angular:physics:targetPosition = 123.80988
+                    float physics:lowerLimit = -160
+                    float physics:upperLimit = 160
+                    float state:angular:physics:position = 123.82338
+                    float state:angular:physics:velocity = 0
+                }
+            }
+
+            over "base"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (1, -0, -0, 0)
+                double3 xformOp:translate = (8.640199666842818e-10, -1.1728843674063683e-8, 0.44999992847442627)
+            }
+
+            over "link_5"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (-0.49848042251725644, -0.5028066661755252, 0.5730105072798263, 0.41274893502392934)
+                double3 xformOp:translate = (0.0015976428985595703, 0.461336612701416, 0.467588871717453)
+
+                over "collisions"
+                {
+                    rel physics:simulationOwner
+                }
+
+                over "joint_6"
+                {
+                    float drive:angular:physics:targetPosition = -0.008144
+                    float physics:lowerLimit = -360
+                    float physics:upperLimit = 360
+                    float state:angular:physics:position = -0.00039085478
+                    float state:angular:physics:velocity = 0
+                }
+            }
+
+            over "link_1"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (0.7342249542301621, 1.4773104405708366e-7, -9.895302399410646e-9, 0.6789062649480372)
+                double3 xformOp:translate = (3.725290298461914e-9, -3.259629011154175e-9, 0.1524999886751175)
+
+                over "collisions"
+                {
+                    rel physics:simulationOwner
+                }
+
+                over "joint_2"
+                {
+                    float drive:angular:physics:targetPosition = -0.793512
+                    float physics:lowerLimit = -360
+                    float physics:upperLimit = 360
+                    float state:angular:physics:position = -0.78624916
+                    float state:angular:physics:velocity = 0
+                }
+            }
+
+            over "base_link"
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double3 xformOp:translate = (3.2378011383116245e-10, 2.801243681460619e-10, -2.60770320892334e-8)
+
+                over "collisions"
+                {
+                    rel physics:simulationOwner
+                }
+
+                over "joint_1"
+                {
+                    float drive:angular:physics:targetPosition = 85.51729
+                    float physics:lowerLimit = -360
+                    float physics:upperLimit = 360
+                    float state:angular:physics:position = 85.51648
+                    float state:angular:physics:velocity = 0
+                }
+            }
+        }
+    }
+
+    def DomeLight "Light"
+    {
+        float inputs:intensity = 500
+    }
+
+    def DistantLight "KeyLight"
+    {
+        float inputs:intensity = 1500
+        float3 xformOp:rotateXYZ = (35, -30, -30)
+        uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+    }
+
+    def Camera "LabOverview" (
+        prepend apiSchemas = ["OmniRtxCameraAutoExposureAPI_1", "OmniRtxCameraExposureAPI_1"]
+        hide_in_stage_window = false
+        no_delete = false
+    )
+    {
+        float4[] clippingPlanes = []
+        float2 clippingRange = (0.01, 10000000)
+        float exposure = 0
+        float exposure:fStop = 5
+        float exposure:iso = 100
+        float exposure:responsivity = 1.1026709
+        float exposure:time = 0.02
+        float focalLength = 18.147562
+        float focusDistance = 400
+        float fStop = 0
+        float horizontalAperture = 20.955
+        float horizontalApertureOffset = 0
+        custom vector3d omni:kit:centerOfInterest = (0, 0, -11.56713142597765)
+        custom float omni:rtx:autoExposure:adaptationSpeed = 3.5
+        custom bool omni:rtx:autoExposure:enabled = 0
+        custom bool omni:rtx:autoExposure:histogramClamping:enabled = 1
+        custom float omni:rtx:autoExposure:histogramClamping:maxLuminance = 100000
+        custom float omni:rtx:autoExposure:histogramClamping:minLuminance = 50
+        custom token omni:rtx:autoExposure:histogramFilter = "median"
+        custom float omni:rtx:autoExposure:whitePointScale = 10
+        token projection = "perspective"
+        uniform token purpose = "default"
+        double shutter:close = 0
+        double shutter:open = 0
+        uniform token stereoRole = "mono"
+        float verticalAperture = 15.2908
+        float verticalApertureOffset = 0
+        token visibility = "inherited"
+        float3 xformOp:rotateYXZ = (85.92661, 4.4775e-14, 93.65178)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (5.472778669183147, 0.1956584574343539, 1.4770963486882116)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateYXZ", "xformOp:scale"]
+    }
+
+    over "FixedStructures"
+    {
+        over "left_table_keepout"
+        {
+            over "Collision"
+            {
+                token visibility = "inherited"
+            }
+        }
+
+        over "gemini336l_mount"
+        {
+            over "RGBRaw"
+            {
+                token visibility = "invisible"
+            }
+        }
+    }
+
+    def Xform "GripperPreview" (
+        displayName = "Gripper mounted to current robot flange"
+        prepend references = @../../../ros2_ws/src/description/uon_3f_description/usd/UON_3finger_gripper.usd@
+    )
+    {
+        matrix4d xformOp:transform = ( (0.0026012325379961565, -0.9877213518542662, 0.15620424027683716, 0), (-0.9863012897497692, -0.02829757204648553, -0.16250850209824666, 0), (0.16493331812349238, -0.15364172124606837, -0.974264451812402, 0), (0.021530166268348694, 0.4427451491355896, 0.349698543548584, 1) )
+        uniform token[] xformOpOrder = ["xformOp:transform"]
+
+        over "UON_3finger_gripper" (
+            delete apiSchemas = ["PhysicsArticulationRootAPI"]
+        )
+        {
+            over "joints"
+            {
+                over "FixedJoint"
+                {
+                    rel physics:body0 = </World/Robot/m1013/link_6>
+                    rel physics:body1 = </World/GripperPreview/UON_3finger_gripper/body>
+                    uniform bool physics:excludeFromArticulation = 0
+                    point3f physics:localPos0 = (0, 0, 0)
+                    point3f physics:localPos1 = (0, 0, 0)
+                    quatf physics:localRot0 = (1, 0, 0, 0)
+                    quatf physics:localRot1 = (1, 0, 0, 0)
+                }
+            }
+
+            over "body"
+            {
+                def Xform "tcp"
+                {
+                    double3 xformOp:translate = (0, 0, 0.2368508)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                }
+            }
+        }
+    }
+}
+
+def "Render" (
+    no_delete = true
+)
+{
+    def "OmniverseKit"
+    {
+        def "HydraTextures"
+        {
+            def RenderProduct "omni_kit_widget_viewport_ViewportTexture_0" (
+                prepend apiSchemas = ["OmniRtxSettingsCommonAdvancedAPI_1", "OmniRtxSettingsRtAdvancedAPI_1", "OmniRtxSettingsPtAdvancedAPI_1", "OmniRtxSettingsParticleFieldAPI_1", "OmniRtxPostColorGradingAPI_1", "OmniRtxPostChromaticAberrationAPI_1", "OmniRtxPostBloomPhysicalAPI_1", "OmniRtxPostMatteObjectAPI_1", "OmniRtxPostCompositingAPI_1", "OmniRtxPostDofAPI_1", "OmniRtxPostMotionBlurAPI_1", "OmniRtxPostTvNoiseAPI_1", "OmniRtxPostTonemapIrayReinhardAPI_1", "OmniRtxPostDebugSettingsAPI_1", "OmniRtxDebugSettingsAPI_1"]
+                no_delete = true
+            )
+            {
+                rel camera = </OmniverseKit_Persp>
+                token omni:rtx:ambientOcclusion:denoiserMode = "none"
+                token omni:rtx:background:source:texture:textureMode = "repeatMirrored"
+                token omni:rtx:background:source:type = "domeLight"
+                bool omni:rtx:debug:view:pixelDebug:enableFixedTextPos = 1
+                token omni:rtx:directLighting:sampledLighting:denoisingTechnique = "None"
+                bool omni:rtx:dlss:frameGeneration = 0
+                bool omni:rtx:indirectDiffuse:denoiser:enabled = 0
+                bool omni:rtx:material:db:syncLoads = 1
+                token omni:rtx:post:dlss:execMode = "performance"
+                bool omni:rtx:post:registeredCompositing:invertColorCorrection = 1
+                bool omni:rtx:post:registeredCompositing:invertToneMap = 1
+                bool omni:rtx:pt:adaptiveSampling:filterError = 0
+                uint omni:rtx:pt:adaptiveSampling:fixedSppIterations = 2
+                uint omni:rtx:pt:maxSamplesPerLaunch = 2073600
+                uint omni:rtx:pt:mgpu:maxPixelsPerRegionExponent = 12
+                bool omni:rtx:reflections:denoiser:enabled = 0
+                token omni:rtx:rendermode = "RealTimePathTracing"
+                color3f omni:rtx:rt:ambientLight:color = (0.1, 0.1, 0.1)
+                bool omni:rtx:rt:demoire = 0
+                bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
+                int omni:rtx:rt:sss:samples = 1
+                uint omni:rtx:rtpt:maxVolumeBounces = 15
+                float omni:rtx:rtpt:modulatingRoughnessThreshold = 0.08
+                bool omni:rtx:scene:hydra:materialSyncLoads = 1
+                bool omni:rtx:scene:hydra:mdlMaterialWarmup = 1
+                rel orderedVars = </Render/Vars/LdrColor>
+                custom bool overrideClipRange = 0
+                uniform int2 resolution = (1280, 720)
+            }
+        }
+    }
+
+    def RenderSettings "OmniverseGlobalRenderSettings" (
+        prepend apiSchemas = ["OmniRtxSettingsGlobalRtAdvancedAPI_1", "OmniRtxSettingsGlobalPtAdvancedAPI_1"]
+        no_delete = true
+    )
+    {
+        rel products = </Render/OmniverseKit/HydraTextures/omni_kit_widget_viewport_ViewportTexture_0>
+    }
+
+    def "Vars" (
+        hide_in_stage_window = true
+        no_delete = true
+    )
+    {
+        def RenderVar "LdrColor" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            uniform string sourceName = "LdrColor"
+            uniform token sourceType = "raw"
+        }
+    }
+}
+
+over "OmniverseKit_Persp" (
+    prepend apiSchemas = ["OmniRtxCameraAutoExposureAPI_1", "OmniRtxCameraExposureAPI_1"]
+    customData = {
+        dictionary omni = {
+            dictionary kit = {
+                bool hide_in_stage_window = 1
+                bool no_delete = 1
+            }
+        }
+    }
+    hide_in_stage_window = true
+    kind = "component"
+    no_delete = true
+)
+{
+    float2 clippingRange = (0.01, 10000000)
+    float exposure:fStop = 5
+    float exposure:responsivity = 1.1026709
+    float exposure:time = 0.02
+    float focalLength = 18.147562
+    float focusDistance = 400
+    custom uniform vector3d omni:kit:centerOfInterest = (0, 0, -19.48351488353892)
+    float3 xformOp:rotateXYZ = (94.42877, -3.6258323e-13, -74.09238)
+    float3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (-3.0683715587779963, 0.09626901980653778, 0.44596854336827607)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+}
+
+over "OmniverseKit_Front" (
+    prepend apiSchemas = ["OmniRtxCameraAutoExposureAPI_1", "OmniRtxCameraExposureAPI_1"]
+    customData = {
+        dictionary omni = {
+            dictionary kit = {
+                bool hide_in_stage_window = 1
+                bool no_delete = 1
+            }
+        }
+    }
+    hide_in_stage_window = true
+    kind = "component"
+    no_delete = true
+)
+{
+    float2 clippingRange = (1, 10000000)
+    float exposure:fStop = 5
+    float exposure:responsivity = 1.1026709
+    float exposure:time = 0.02
+    float horizontalAperture = 50
+    custom uniform vector3d omni:kit:centerOfInterest = (0, 0, -5)
+    token projection = "orthographic"
+    float verticalAperture = 50
+    float3 xformOp:rotateXYZ = (90, -1.2722219e-14, 90)
+    float3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (5, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+}
+
+over "OmniverseKit_Right" (
+    prepend apiSchemas = ["OmniRtxCameraAutoExposureAPI_1", "OmniRtxCameraExposureAPI_1"]
+    customData = {
+        dictionary omni = {
+            dictionary kit = {
+                bool hide_in_stage_window = 1
+                bool no_delete = 1
+            }
+        }
+    }
+    hide_in_stage_window = true
+    kind = "component"
+    no_delete = true
+)
+{
+    float2 clippingRange = (1, 10000000)
+    float exposure:fStop = 5
+    float exposure:responsivity = 1.1026709
+    float exposure:time = 0.02
+    float horizontalAperture = 52.609455
+    custom uniform vector3d omni:kit:centerOfInterest = (0, 0, -5)
+    token projection = "orthographic"
+    float verticalAperture = 52.609455
+    float3 xformOp:rotateXYZ = (90, -5.1684015e-15, 1.2722219e-14)
+    float3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (-1.025579472613159, -5, 1.2196080214859188)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+}
+
+over "OmniverseKit_Top" (
+    prepend apiSchemas = ["OmniRtxCameraAutoExposureAPI_1", "OmniRtxCameraExposureAPI_1"]
+    customData = {
+        dictionary omni = {
+            dictionary kit = {
+                bool hide_in_stage_window = 1
+                bool no_delete = 1
+            }
+        }
+    }
+    hide_in_stage_window = true
+    kind = "component"
+    no_delete = true
+)
+{
+    float2 clippingRange = (1, 10000000)
+    float exposure:fStop = 5
+    float exposure:responsivity = 1.1026709
+    float exposure:time = 0.02
+    float horizontalAperture = 50
+    custom uniform vector3d omni:kit:centerOfInterest = (0, 0, -5)
+    token projection = "orthographic"
+    float verticalAperture = 50
+    float3 xformOp:rotateXYZ = (-1.2722219e-14, -7.016709e-15, -90)
+    float3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (0, 0, 5)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+}

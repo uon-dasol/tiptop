@@ -247,6 +247,25 @@ def test_saved_final_grasp_does_not_require_a_database_or_pose_estimation_file(t
     assert not (tmp_path/'registered-pose.json').exists()
 
 
+@pytest.mark.parametrize('source', ['plan', 'virtual_observation'])
+def test_saved_candidates_use_recorded_db_alignment(tmp_path, monkeypatch, source):
+    correction = np.diag([-1., -1., 1., 1.]).tolist()
+    np.savez(tmp_path/'observation.npz', observation_id='saved', rgb=np.zeros((6,8,3),np.uint8),
+             intrinsics=np.eye(3), world_from_cam=np.eye(4), depth=np.ones((6,8)),
+             camera_preparation=json.dumps({'db_grasp_from_tcp': correction} if source == 'virtual_observation' else {}))
+    (tmp_path/'task-result.json').write_text(json.dumps(dict(task='saved task')))
+    (tmp_path/'registered-pose.json').write_text(json.dumps(dict(class_id='fixture', pose={'world_from_cad': np.eye(4).tolist()})))
+    (tmp_path/'db.json').write_text(json.dumps({'data': [{'score':1., 'grasp_mat':np.eye(4).tolist()}]}))
+    if source == 'plan':
+        (tmp_path/'plan.json').write_text(json.dumps({'db_grasp_from_tcp': correction}))
+    monkeypatch.setattr('tiptop.object_catalog.registered_object', lambda _: {'db':tmp_path/'db.json'})
+    received = []
+    monkeypatch.setattr(TaskPreview, 'grasps', lambda self, candidates, *a, **kw: received.append(candidates))
+    monkeypatch.setattr(TaskPreview, 'publish_plan', lambda *a: None)
+    preview_saved_task(tmp_path)
+    np.testing.assert_allclose(received[0]['world_from_tcp'], [correction])
+
+
 def test_side_view_keeps_metric_heights_and_uses_the_final_commanded_gripper(tmp_path):
     preview = snapshot(tmp_path)
     vertices = np.array([[.1, .2, .03], [.2, .2, .03], [.1, .3, .13], [.2, .3, .13]])

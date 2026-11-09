@@ -20,7 +20,17 @@ from tiptop.doosan.virtual_camera import (
 from tiptop.perception.cameras.geometry import camera_world_pose
 
 
-FIXED = DEFAULT_PREPARATION.with_name("fixed_camera.json")
+def fixed_preparation():
+    """Synthetic geometry for unit tests, independent of saved experiments."""
+    pose = np.diag([1., -1., -1., 1.])
+    pose[:3, 3] = [.2, .3, 1.1]
+    return load_camera_preparation(dict(
+        profile=dict(mount="fixed", parent_link="base_link", parent_from_rig=pose.tolist(),
+                     body_dims_m=[.1, .04, .03], bracket_dims_m=[.05, .03, .02],
+                     rig_from_bracket_xyz_m=[0., 0., -.04], collision_margin_m=.002,
+                     baseline_m=.08, resolution_wh=[640, 480], horizontal_fov_deg=90.),
+        q_capture=[0.]*6, fixed_obstacles=[],
+    ))
 
 
 def test_runtime_configuration_imports_without_camera_or_gpu_libraries():
@@ -47,16 +57,16 @@ def test_legacy_wrist_keeps_its_mount_and_has_no_fixed_camera_boxes():
 
 
 def test_fixed_view_covers_table_and_is_independent_of_robot_motion():
-    prepared = load_camera_preparation(FIXED)
+    prepared = fixed_preparation()
     profile = prepared["profile"]
     transform = np.asarray(profile["parent_from_rig"], float)
     np.testing.assert_allclose(transform[:3, 2], [0, 0, -1])
-    for x in [.25, 1.05]:
-        for y in [-.4, .4]:
+    for x in [-.2, .6]:
+        for y in [-.1, .7]:
             # The actual perception image is the left stereo optical frame.
             left = transform.copy()
             left[:3, 3] -= transform[:3, 0] * profile["baseline_m"] / 2
-            point = left[:3, :3].T @ (np.array([x, y, .4]) - left[:3, 3])
+            point = left[:3, :3].T @ (np.array([x, y, .2]) - left[:3, 3])
             half_width = point[2] * np.tan(np.deg2rad(profile["horizontal_fov_deg"]) / 2)
             half_height = half_width * profile["resolution_wh"][1] / profile["resolution_wh"][0]
             assert point[2] > 0 and abs(point[0]) < half_width and abs(point[1]) < half_height
@@ -67,13 +77,13 @@ def test_fixed_view_covers_table_and_is_independent_of_robot_motion():
 
 
 def test_fixed_camera_boxes_are_world_obstacles_and_do_not_attach_to_arm():
-    prepared = load_camera_preparation(FIXED)
+    prepared = fixed_preparation()
     obstacle = dict(name="stand", dims_m=[.05, .05, 1], base_from_obstacle=np.eye(4).tolist())
     prepared["fixed_obstacles"] = [obstacle]
     boxes = virtual_camera_obstacles(prepared)
     assert [b["name"] for b in boxes] == ["stand", "fixed_camera_body", "fixed_camera_bracket"]
-    np.testing.assert_allclose(np.asarray(boxes[1]["base_from_obstacle"])[:3, 3], [.65, 0, 1.21385])
-    np.testing.assert_allclose(np.asarray(boxes[2]["base_from_obstacle"])[:3, 3], [.59, 0, 1.23])
+    np.testing.assert_allclose(np.asarray(boxes[1]["base_from_obstacle"])[:3, 3], [.2, .3, 1.115])
+    np.testing.assert_allclose(np.asarray(boxes[2]["base_from_obstacle"])[:3, 3], [.2, .3, 1.14])
     options = camera_planning_options(prepared)
     assert options["camera_profile"] is None  # No wrist spheres are added in fixed mode.
     assert len(options["fixed_obstacles"]) == 3
@@ -83,18 +93,31 @@ def test_fixed_camera_boxes_are_world_obstacles_and_do_not_attach_to_arm():
     assert prepared["fixed_obstacles"] == [obstacle]
 
 
-def test_live_camera_geometry_is_authoritative_and_conflicting_cli_file_is_rejected():
-    prepared = load_camera_preparation(FIXED)
+def test_live_camera_geometry_is_authoritative_and_conflicting_cli_file_is_rejected(tmp_path):
+    prepared = fixed_preparation()
     packet = dict(camera_preparation=np.array(json.dumps(prepared)))
     assert resolve_camera_preparation(packet) == prepared
-    assert resolve_camera_preparation(packet, FIXED) == prepared
+    selected = tmp_path / "camera.json"
+    selected.write_text(json.dumps(prepared))
+    assert resolve_camera_preparation(packet, selected) == prepared
     with pytest.raises(ValueError, match="differs"):
         resolve_camera_preparation(packet, DEFAULT_PREPARATION)
     assert resolve_camera_preparation({})["profile"]["mount"] == "wrist"
 
 
+def test_virtual_db_alignment_is_validated_and_bound_to_the_plan_identity():
+    prepared = fixed_preparation()
+    previous = camera_preparation_id(prepared)
+    prepared['db_grasp_from_tcp'] = np.diag([-1., -1., 1., 1.]).tolist()
+    updated = load_camera_preparation(prepared)
+    assert camera_preparation_id(updated) != previous
+    prepared['db_grasp_from_tcp'][0][0] = 2.
+    with pytest.raises(ValueError, match='db_grasp_from_tcp'):
+        load_camera_preparation(prepared)
+
+
 def test_fixed_runtime_rejects_plans_for_another_mount_or_changed_structure():
-    prepared = load_camera_preparation(FIXED)
+    prepared = fixed_preparation()
     plan = dict(camera_preparation_sha256=camera_preparation_id(prepared))
     validate_virtual_camera_plan(plan, prepared)
     for invalid in [{}, dict(camera_preparation_sha256=camera_preparation_id(load_camera_preparation(DEFAULT_PREPARATION)))]:
@@ -111,14 +134,14 @@ def test_fixed_runtime_rejects_plans_for_another_mount_or_changed_structure():
     {"horizontal_fov_deg": 180}, {"resolution_wh": [640, 0]}, {"body_dims_m": [0, .1, .1]},
 ])
 def test_bad_fixed_geometry_fails_before_starting_runtime(change):
-    prepared = load_camera_preparation(FIXED)
+    prepared = fixed_preparation()
     prepared["profile"].update(change)
     with pytest.raises(ValueError):
         load_camera_preparation(prepared)
 
 
 def test_fixed_structure_cannot_override_another_usd_path():
-    prepared = load_camera_preparation(FIXED)
+    prepared = fixed_preparation()
     prepared["fixed_obstacles"] = [dict(name="../Arm", dims_m=[1, 1, 1], base_from_obstacle=np.eye(4).tolist())]
     with pytest.raises(ValueError, match="names"):
         load_camera_preparation(prepared)

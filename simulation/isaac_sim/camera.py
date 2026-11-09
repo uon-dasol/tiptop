@@ -98,3 +98,101 @@ class IsaacStereoCamera:
             annotator.detach()
         for product in self.products:
             product.destroy()
+
+
+class IsaacLabCamera:
+    """Saved 336L optics adapted to the existing RGB-D decoder.
+
+    Depth is ideal renderer geometry, not FoundationStereo output.
+    RGB and aligned depth are undistorted together for downstream pinhole K.
+    """
+
+    def __init__(self, stage):
+        import json
+        import cv2
+        import omni.replicator.core as rep
+        from lab_camera import FACTORY, MOUNT, camera_specs
+
+        self.stage, self._rep = stage, rep
+        self.factory = json.loads(FACTORY.read_text())
+        self.specs = camera_specs(self.factory)
+        self.root = MOUNT
+        self.width, self.height = self.specs["RGB180"]["resolution_wh"]
+        self.intrinsics = self.specs["RGB180"]["K"].copy()
+        self.serial = "isaac/gemini_336l_lab_rgbd"
+        self.products, self.annotators = [], []
+        self._attach_render_products()
+        self._maps = cv2.initUndistortRectifyMap(
+            self.intrinsics, self.specs["RGB180"]["D"], None, self.intrinsics,
+            (self.width, self.height), cv2.CV_32FC1)
+        rep.orchestrator.set_capture_on_play(False)
+
+    def _attach_render_products(self):
+        for label, kind in (("RGB180", "rgb"), ("Depth180", "distance_to_image_plane")):
+            path = self.root + "/" + label
+            if not self.stage.GetPrimAtPath(path).IsValid():
+                raise ValueError(f"Missing lab camera: {path}")
+            product = self._rep.create.render_product(path, tuple(self.specs[label]["resolution_wh"]))
+            annotator = self._rep.AnnotatorRegistry.get_annotator(kind)
+            annotator.attach(product)
+            self.products.append(product)
+            self.annotators.append(annotator)
+
+    def _ensure_render_products(self):
+        from omni.replicator.core.scripts.annotators import AnnotatorRegistryError
+
+        try:
+            for annotator in self.annotators:
+                annotator.get_node()
+        except AnnotatorRegistryError:
+            # File > Save As can clear SyntheticData's graph while leaving the
+            # Python camera object alive. Recreate handles on the current stage.
+            import omni.usd
+
+            for product in self.products:
+                product.destroy()
+            self.stage = omni.usd.get_context().get_stage()
+            self.products, self.annotators = [], []
+            self._attach_render_products()
+            print("LAB_CAMERA_REATTACHED after stage save/reload", flush=True)
+
+    def world_from_cam(self):
+        from pxr import UsdGeom
+        from lab_camera import CV_FROM_USD
+
+        cache = UsdGeom.XformCache()
+        return np.asarray(cache.GetLocalToWorldTransform(
+            self.stage.GetPrimAtPath(self.root + "/RGB180"))).T @ CV_FROM_USD
+
+    def preview_rgb(self, *, render=False):
+        """Read the latest rendered RGB without a task capture or physics step."""
+        import cv2
+
+        self._ensure_render_products()
+        if render:
+            self._rep.orchestrator.step(rt_subframes=1, delta_time=0., pause_timeline=False)
+        rgba = np.asarray(self.annotators[0].get_data())
+        if rgba.shape != (self.height, self.width, 4):
+            return None
+        return cv2.remap(rgba[..., :3], *self._maps, cv2.INTER_LINEAR)
+
+    def capture_request(self, q_init, task_instruction, *, pause_timeline=True):
+        import cv2
+        from lab_camera import align_depth180_to_rgb180
+
+        self._ensure_render_products()
+        self._rep.orchestrator.step(rt_subframes=4, delta_time=0., pause_timeline=pause_timeline)
+        rgb = np.asarray(self.annotators[0].get_data())[..., :3].copy()
+        depth = np.asarray(self.annotators[1].get_data()).squeeze().copy()
+        if rgb.shape != (self.height, self.width, 3) or depth.shape != (480,848):
+            raise RuntimeError("Lab RGB/depth render is not ready")
+        depth[~np.isfinite(depth)] = 0
+        aligned = align_depth180_to_rgb180(depth, self.factory)
+        rgb = cv2.remap(rgb, *self._maps, cv2.INTER_LINEAR)
+        aligned = cv2.remap(aligned, *self._maps, cv2.INTER_NEAREST)
+        return dict(rgb=rgb, depth=aligned.astype(np.float32), intrinsics=self.intrinsics.copy(),
+                    world_from_cam=self.world_from_cam(), q_init=np.asarray(q_init, float).copy(),
+                    task=task_instruction, camera_model=self.serial, timestamp=time.time(),
+                    depth_source="isaac_geometric", world_frame="base_link")
+
+    close = IsaacStereoCamera.close

@@ -1,0 +1,217 @@
+#usda 1.0
+(
+    subLayers = [@lab_table_camera.usda@]
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+over "World"
+{
+    def Xform "FixedStructures"
+    {
+        def Xform "left_table_keepout" (
+            displayName = "Left table - no robot entry"
+            documentation = "Virtual exclusion volume above the -Y table section. Keep dimensions and position aligned with the shared hardware profile workspace.fixed_obstacles."
+        )
+        {
+            double3 xformOp:translate = (0, -0.8475, 1)
+            double3 xformOp:scale = (0.78, 0.805, 2)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+
+            def Cube "Collision" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                double size = 1
+                bool physics:collisionEnabled = true
+                token visibility = "invisible"
+            }
+
+        }
+
+        def Mesh "right_table_structure" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+            displayName = "One complete upper frame - outer 78 x 60 cm, inward width 8 cm"
+            documentation = "Existing 52 cm over-table section and 8 cm rear strip combined into one perimeter. No separate rear crossbar or internal divider. Outer 78 x 60 cm; opening 62 x 44 cm; height 8 cm."
+        )
+        {
+            bool physics:collisionEnabled = true
+            uniform token physics:approximation = "none"
+            uniform token subdivisionScheme = "none"
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 4, 5, 1, 8, 9, 13, 12, 0, 1, 9, 8, 4, 12, 13, 5, 1, 5, 6, 2, 9, 10, 14, 13, 1, 2, 10, 9, 5, 13, 14, 6, 2, 6, 7, 3, 10, 11, 15, 14, 2, 3, 11, 10, 6, 14, 15, 7, 3, 7, 4, 0, 11, 8, 12, 15, 3, 0, 8, 11, 7, 15, 12, 4]
+            point3f[] points = [(-0.5, -0.5, -0.5), (0.5, -0.5, -0.5), (0.5, 0.5, -0.5), (-0.5, 0.5, -0.5), (-0.3974358974358974, -0.3666666666666667, -0.5), (0.3974358974358974, -0.3666666666666667, -0.5), (0.3974358974358974, 0.3666666666666667, -0.5), (-0.3974358974358974, 0.3666666666666667, -0.5), (-0.5, -0.5, 0.5), (0.5, -0.5, 0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5), (-0.3974358974358974, -0.3666666666666667, 0.5), (0.3974358974358974, -0.3666666666666667, 0.5), (0.3974358974358974, 0.3666666666666667, 0.5), (-0.3974358974358974, 0.3666666666666667, 0.5)]
+            color3f[] primvars:displayColor = [(0.45, 0.47, 0.5)]
+            double3 xformOp:translate = (0, 1.03, 1.215)
+            double3 xformOp:scale = (0.78, 0.6, 0.08)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Xform "right_table_structure_lower" (
+            displayName = "Two diagonals - one large triangular opening per side"
+            documentation = "Only the two 8 cm diagonals are added here. Existing upper and rear outer-frame profiles form the other sides of each triangle. No duplicate upper/rear members or X crossbars partition the openings."
+        )
+        {
+            double3 xformOp:translate = (0, 1.08, 1.0075)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def Mesh "diagonal_neg_x" (
+                prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                displayName = "Mitered diagonal - outer 47.73 cm, inner 31.73 cm"
+            )
+            {
+                bool physics:collisionEnabled = true
+                uniform token physics:approximation = "convexHull"
+                uniform token subdivisionScheme = "none"
+                int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                int[] faceVertexIndices = [3, 2, 1, 0, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7]
+                point3f[] points = [(-0.5, -0.5, 0.5), (-0.5, -0.5, -0.5), (-0.5, 0.5, -0.3348588945162049), (-0.5, 0.5, 0.3298925213283439), (0.5, -0.5, 0.5), (0.5, -0.5, -0.5), (0.5, 0.5, -0.3348588945162049), (0.5, 0.5, 0.3298925213283439)]
+                color3f[] primvars:displayColor = [(0.38, 0.4, 0.43)]
+                double3 xformOp:translate = (-0.35, 0.02807398793224514, 0.02849300267750232)
+                double xformOp:rotateX = 45.42440541936146
+                double3 xformOp:scale = (0.08, 0.08, 0.4773101716913228)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:scale"]
+            }
+
+            def Mesh "diagonal_pos_x" (
+                prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                displayName = "Mitered diagonal - outer 47.73 cm, inner 31.73 cm"
+            )
+            {
+                bool physics:collisionEnabled = true
+                uniform token physics:approximation = "convexHull"
+                uniform token subdivisionScheme = "none"
+                int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                int[] faceVertexIndices = [3, 2, 1, 0, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7]
+                point3f[] points = [(-0.5, -0.5, 0.5), (-0.5, -0.5, -0.5), (-0.5, 0.5, -0.3348588945162049), (-0.5, 0.5, 0.3298925213283439), (0.5, -0.5, 0.5), (0.5, -0.5, -0.5), (0.5, 0.5, -0.3348588945162049), (0.5, 0.5, 0.3298925213283439)]
+                color3f[] primvars:displayColor = [(0.38, 0.4, 0.43)]
+                double3 xformOp:translate = (0.35, 0.02807398793224514, 0.02849300267750232)
+                double xformOp:rotateX = 45.42440541936146
+                double3 xformOp:scale = (0.08, 0.08, 0.4773101716913228)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:scale"]
+            }
+
+        }
+
+        def Cube "right_profile_support" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+            displayName = "Right rear support - X 78 x Y 8 x Z 3 cm"
+        )
+        {
+            double size = 1
+            bool physics:collisionEnabled = true
+            color3f[] primvars:displayColor = [(0.58, 0.48, 0.36)]
+            double3 xformOp:translate = (0, 1.29, -0.015)
+            double3 xformOp:scale = (0.78, 0.08, 0.03)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "right_profile_neg_x" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+            displayName = "Right rear upright - negative X, height 117.5 cm plus 8 cm top frame"
+        )
+        {
+            double size = 1
+            bool physics:collisionEnabled = true
+            color3f[] primvars:displayColor = [(0.55, 0.57, 0.6)]
+            double3 xformOp:translate = (-0.35, 1.29, 0.5875)
+            double3 xformOp:scale = (0.08, 0.08, 1.175)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "right_profile_pos_x" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+            displayName = "Right rear upright - positive X, height 117.5 cm plus 8 cm top frame"
+        )
+        {
+            double size = 1
+            bool physics:collisionEnabled = true
+            color3f[] primvars:displayColor = [(0.55, 0.57, 0.6)]
+            double3 xformOp:translate = (0.35, 1.29, 0.5875)
+            double3 xformOp:scale = (0.08, 0.08, 1.175)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "right_profile_crossbar" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+            displayName = "Right rear crossbar - 62 x 8 x 8 cm, Z 76 to 84 cm"
+            documentation = "Outside the tabletop, between the rear posts. Top is flush with the lower structure bottom at Z=84 cm; no vertical gap."
+        )
+        {
+            double size = 1
+            bool physics:collisionEnabled = true
+            color3f[] primvars:displayColor = [(0.55, 0.57, 0.6)]
+            double3 xformOp:translate = (0, 1.29, 0.8)
+            double3 xformOp:scale = (0.62, 0.08, 0.08)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Mesh "right_crossbar_block_neg_x" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+            displayName = "Half-cube triangular bracket - negative X, under crossbar"
+        )
+        {
+            bool physics:collisionEnabled = true
+            uniform token physics:approximation = "convexHull"
+            uniform token subdivisionScheme = "none"
+            int[] faceVertexCounts = [3, 3, 4, 4, 4]
+            int[] faceVertexIndices = [2, 1, 0, 3, 4, 5, 0, 1, 4, 3, 1, 2, 5, 4, 2, 0, 3, 5]
+            point3f[] points = [(-0.5, -0.5, 0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, -0.5), (-0.5, 0.5, 0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, -0.5)]
+            color3f[] primvars:displayColor = [(0.55, 0.57, 0.6)]
+            double3 xformOp:translate = (-0.27, 1.29, 0.72)
+            double3 xformOp:scale = (0.08, 0.08, 0.08)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Mesh "right_crossbar_block_pos_x" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+            displayName = "Half-cube triangular bracket - positive X, under crossbar"
+        )
+        {
+            bool physics:collisionEnabled = true
+            uniform token physics:approximation = "convexHull"
+            uniform token subdivisionScheme = "none"
+            int[] faceVertexCounts = [3, 3, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 5, 4, 3, 3, 4, 1, 0, 4, 5, 2, 1, 5, 3, 0, 2]
+            point3f[] points = [(0.5, -0.5, 0.5), (-0.5, -0.5, 0.5), (0.5, -0.5, -0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5), (0.5, 0.5, -0.5)]
+            color3f[] primvars:displayColor = [(0.55, 0.57, 0.6)]
+            double3 xformOp:translate = (0.27, 1.29, 0.72)
+            double3 xformOp:scale = (0.08, 0.08, 0.08)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Mesh "right_base_block_neg_x" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+            displayName = "Half-cube triangular bracket - negative X, on support"
+        )
+        {
+            bool physics:collisionEnabled = true
+            uniform token physics:approximation = "convexHull"
+            uniform token subdivisionScheme = "none"
+            int[] faceVertexCounts = [3, 3, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 5, 4, 3, 3, 4, 1, 0, 4, 5, 2, 1, 5, 3, 0, 2]
+            point3f[] points = [(-0.5, -0.5, -0.5), (0.5, -0.5, -0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, -0.5), (0.5, 0.5, -0.5), (-0.5, 0.5, 0.5)]
+            color3f[] primvars:displayColor = [(0.55, 0.57, 0.6)]
+            double3 xformOp:translate = (-0.27, 1.29, 0.04)
+            double3 xformOp:scale = (0.08, 0.08, 0.08)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Mesh "right_base_block_pos_x" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+            displayName = "Half-cube triangular bracket - positive X, on support"
+        )
+        {
+            bool physics:collisionEnabled = true
+            uniform token physics:approximation = "convexHull"
+            uniform token subdivisionScheme = "none"
+            int[] faceVertexCounts = [3, 3, 4, 4, 4]
+            int[] faceVertexIndices = [2, 1, 0, 3, 4, 5, 0, 1, 4, 3, 1, 2, 5, 4, 2, 0, 3, 5]
+            point3f[] points = [(0.5, -0.5, -0.5), (-0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (0.5, 0.5, -0.5), (-0.5, 0.5, -0.5), (0.5, 0.5, 0.5)]
+            color3f[] primvars:displayColor = [(0.55, 0.57, 0.6)]
+            double3 xformOp:translate = (0.27, 1.29, 0.04)
+            double3 xformOp:scale = (0.08, 0.08, 0.08)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+    }
+}

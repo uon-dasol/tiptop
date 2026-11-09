@@ -1,0 +1,158 @@
+[
+  {
+    "class": "black_pepper_shaker",
+    "asset": "/nas/ochansol/3d_model/2026_real_world_test_objects/black_pepper_shaker/edited/black_pepper_shaker_rigid.usd",
+    "cad": "/nas/ochansol/3d_model/2026_real_world_test_objects/black_pepper_shaker/edited/black_pepper_shaker.obj",
+    "db_directory": "/nas/Dataset/Dataset_2026/isaacsim_grasp_data_gen/black_pepper_shaker/UON_3finger_gripper",
+    "asset_scale": [
+      0.1,
+      0.1,
+      0.1
+    ],
+    "mass_source": "existing rigid USD",
+    "db_count": 4892,
+    "instance_id": "black_pepper_shaker-01",
+    "world_from_object": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.15
+      ],
+      [
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.62
+      ],
+      [
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.039722548999999996
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "world_bounds": [
+      [
+        0.11839710400000003,
+        0.6024364240000001,
+        0.0020000000000000018
+      ],
+      [
+        0.179176605,
+        0.6383252960000001,
+        0.083304096
+      ]
+    ]
+  },
+  {
+    "class": "car_leather_conditioner_bottle",
+    "asset": "/nas/ochansol/3d_model/2026_real_world_test_objects/car_leather_conditioner_bottle/edited/car_leather_conditioner_bottle_rigid.usd",
+    "cad": "/nas/ochansol/3d_model/2026_real_world_test_objects/car_leather_conditioner_bottle/edited/car_leather_conditioner_bottle.obj",
+    "db_directory": "/nas/Dataset/Dataset_2026/isaacsim_grasp_data_gen/car_leather_conditioner_bottle/UON_3finger_gripper",
+    "asset_scale": [
+      0.1,
+      0.1,
+      0.1
+    ],
+    "mass_source": "existing rigid USD",
+    "db_count": 5852,
+    "instance_id": "car_leather_conditioner_bottle-01",
+    "world_from_object": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        -0.15
+      ],
+      [
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.7
+      ],
+      [
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.03486060699999999
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "world_bounds": [
+      [
+        -0.18434977700000005,
+        0.684246393,
+        0.0020000000000000018
+      ],
+      [
+        -0.11834469199999997,
+        0.7157618609999999,
+        0.156064129
+      ]
+    ]
+  },
+  {
+    "class": "disney_mickey_handled_dipper",
+    "asset": "/nas/ochansol/3d_model/2026_real_world_test_objects/disney_mickey_handled_dipper/edited/disney_mickey_handled_dipper_rigid.usd",
+    "cad": "/nas/ochansol/3d_model/2026_real_world_test_objects/disney_mickey_handled_dipper/edited/disney_mickey_handled_dipper.obj",
+    "db_directory": "/nas/Dataset/Dataset_2026/isaacsim_grasp_data_gen/disney_mickey_handled_dipper/UON_3finger_gripper",
+    "asset_scale": [
+      0.1,
+      0.1,
+      0.1
+    ],
+    "mass_source": "existing rigid USD",
+    "db_count": 5184,
+    "instance_id": "disney_mickey_handled_dipper-01",
+    "world_from_object": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.12
+      ],
+      [
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.74
+      ],
+      [
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.05533790599999999
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "world_bounds": [
+      [
+        0.056556942000000054,
+        0.6746299440000001,
+        0.0020000000000000018
+      ],
+      [
+        0.18352607699999998,
+        0.917353546,
+        0.09960238699999996
+      ]
+    ]
+  }
+]
