@@ -1,0 +1,699 @@
+{
+  "version": 1,
+  "calibrated": true,
+  "length_units": "metres",
+  "joint_units": "radians",
+  "camera_calibration": "m1013_fixed_camera.declared.json",
+  "tool": {
+    "calibrated": true,
+    "gripper_geometry_matches_reference": true,
+    "link_6_from_gripper_body": [
+      [
+        2.220446049250313e-16,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        -1.0,
+        2.220446049250313e-16,
+        -0.0,
+        0.0
+      ],
+      [
+        -0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "gripper_body_from_tcp": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.2368508
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "db_grasp_from_tcp": [
+      [
+        0.5,
+        0.8660254037844386,
+        0.0,
+        0.0
+      ],
+      [
+        -0.8660254037844386,
+        0.5,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "camera_profile": {
+    "model_name": "gemini_336l_user_declared_lab_body",
+    "mount": "fixed",
+    "parent_link": "base_link",
+    "parent_from_rig": [
+      [
+        -1.0,
+        0.0,
+        0.0,
+        -0.01
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        0.76
+      ],
+      [
+        0.0,
+        0.0,
+        -1.0,
+        1.02
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "body_dims_m": [
+      0.124,
+      0.029,
+      0.0277
+    ],
+    "bracket_dims_m": [
+      0.07,
+      0.06,
+      0.1273
+    ],
+    "rig_from_bracket_xyz_m": [
+      0.0,
+      0.0,
+      -0.09135
+    ],
+    "collision_margin_m": 0.002,
+    "mount_calibrated": true
+  },
+  "workspace": {
+    "calibrated": true,
+    "pick_place_bounds_xy_m": [
+      [
+        -0.365,
+        0.47000000000000003
+      ],
+      [
+        0.365,
+        1.225
+      ]
+    ],
+    "fixed_base_world_contact": true,
+    "fixed_obstacles": [
+      {
+        "name": "full_table",
+        "dims_m": [
+          0.78,
+          2.5,
+          0.03
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            -0.015
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_left_table_keepout_Collision",
+        "dims_m": [
+          0.78,
+          0.805,
+          2.0
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            -0.8475
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_table_structure_0",
+        "dims_m": [
+          0.78,
+          0.07999999523162842,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.7699999976158143
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            1.215
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_table_structure_1",
+        "dims_m": [
+          0.78,
+          0.07999999523162842,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.2900000023841858
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            1.215
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_table_structure_2",
+        "dims_m": [
+          0.07999999523162842,
+          0.4400000095367432,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.3500000023841858
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.03
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            1.215
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_table_structure_3",
+        "dims_m": [
+          0.07999999523162842,
+          0.4400000095367432,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.3500000023841858
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.03
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            1.215
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_table_structure_lower_diagonal_neg_x",
+        "dims_m": [
+          0.08,
+          0.08,
+          0.4773101716913228
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.35
+          ],
+          [
+            0.0,
+            0.701849698306126,
+            -0.7123250669375605,
+            1.1080739879322452
+          ],
+          [
+            0.0,
+            0.7123250669375605,
+            0.701849698306126,
+            1.0359930026775024
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_table_structure_lower_diagonal_pos_x",
+        "dims_m": [
+          0.08,
+          0.08,
+          0.4773101716913228
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          [
+            0.0,
+            0.701849698306126,
+            -0.7123250669375605,
+            1.1080739879322452
+          ],
+          [
+            0.0,
+            0.7123250669375605,
+            0.701849698306126,
+            1.0359930026775024
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_profile_support",
+        "dims_m": [
+          0.78,
+          0.08,
+          0.03
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.29
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            -0.015
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_profile_neg_x",
+        "dims_m": [
+          0.08,
+          0.08,
+          1.175
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.35
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.29
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.5875
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_profile_pos_x",
+        "dims_m": [
+          0.08,
+          0.08,
+          1.175
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.29
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.5875
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_profile_crossbar",
+        "dims_m": [
+          0.62,
+          0.08,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.29
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.8
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_crossbar_block_neg_x",
+        "dims_m": [
+          0.08,
+          0.08,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.27
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.29
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.72
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_crossbar_block_pos_x",
+        "dims_m": [
+          0.08,
+          0.08,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.27
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.29
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.72
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_base_block_neg_x",
+        "dims_m": [
+          0.08,
+          0.08,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.27
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.29
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.04
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "lab_right_base_block_pos_x",
+        "dims_m": [
+          0.08,
+          0.08,
+          0.08
+        ],
+        "base_from_obstacle": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.27
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1.29
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.04
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    ]
+  },
+  "note": "USER-DECLARED, NOT MEASURED. On 2026-10-29 the operator chose to use the Isaac lab geometry as the physical geometry and to calibrate later. Camera pose, gripper mount translation (zero), TCP (0.2368508 m), DB-grasp/TCP alignment and table/structure boxes are unverified. The mount yaw -90 deg was visually compared with the real gripper by the operator. Replace with measured files when calibration is done. On 2026-11-03 the operator requested a provisional DB-grasp-to-TCP local Z rotation of 45 degrees with zero translation for a trial. Physical mount yaw -90 degrees and the gripper model remain unchanged; the DB alignment is not independently calibrated. On 2026-11-03 the operator corrected the camera placement by 0.01m along world/base -X; orientation, Y and Z are unchanged. On 2026-11-03 the operator set upper-frame-underside to camera-front distance to 0.155m: camera front Z=1.02m, frame underside Z=1.175m. The hanging bracket extends to the unchanged frame. The operator corrected the frame underside height to 1.175m on 2026-11-03, retaining the 0.155m frame-to-front gap and camera front at Z=1.02m.",
+  "geometry_source": "user_declared_isaac_lab"
+}

@@ -247,7 +247,7 @@
     <child link="base_link" />
   </joint>
   <joint name="gripper_mount_joint" type="fixed">
-    <origin rpy="0.0 0.0 0.0" xyz="0.0 0.0 0.0" />
+    <origin rpy="0.0 0.0 -1.5707963267948966" xyz="0.0 0.0 0.0" />
     <parent link="link_6" />
     <child link="gripper_body" />
   </joint>
@@ -276,7 +276,7 @@
     <mimic joint="gripper_spinner_joint" multiplier="-2" offset="0" />
   </joint>
   <joint name="gripper_spinner_joint" type="revolute">
-    <origin rpy="0. 0. 0." xyz="0. 0. 0.1" />
+    <origin rpy="0. 0. 3.14159265" xyz="0. 0. 0.1" />
     <parent link="gripper_body" />
     <child link="gripper_spinner" />
     <axis xyz="0. 0. 1." />

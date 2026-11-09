@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from tiptop.camera_geometry import _rigid_transform
+from tiptop.camera_geometry import _rigid_transform, fixed_camera_envelopes
 
 
 DEFAULT_PREPARATION = Path(__file__).resolve().parents[2] / "simulation/isaac_sim/config/wrist_camera.json"
@@ -93,19 +93,9 @@ def virtual_camera_obstacles(preparation):
     """Return fixed camera/structure boxes in base_link, without robot links."""
     result = deepcopy(preparation.get("fixed_obstacles", []))
     profile = preparation["profile"]
-    if profile["mount"] != "fixed":
+    if profile["mount"] != "fixed" or profile.get("collision_geometry_in_fixed_obstacles", False):
         return result
-    base_from_rig = np.asarray(profile["parent_from_rig"], float)
-    margin = float(profile["collision_margin_m"])
-    for name, dims, offset in [
-        ("fixed_camera_body", profile["body_dims_m"], [0, 0, -profile["body_dims_m"][2] / 2]),
-        ("fixed_camera_bracket", profile["bracket_dims_m"], profile["rig_from_bracket_xyz_m"]),
-    ]:
-        transform = base_from_rig.copy()
-        transform[:3, 3] += transform[:3, :3] @ np.asarray(offset)
-        result.append(
-            dict(name=name, dims_m=(np.asarray(dims) + 2 * margin).tolist(), base_from_obstacle=transform.tolist())
-        )
+    result.extend(fixed_camera_envelopes(profile))
     return result
 
 
@@ -121,6 +111,7 @@ def camera_planning_options(preparation):
     return dict(
         camera_profile=preparation["profile"] if preparation["profile"]["mount"] == "wrist" else None,
         fixed_obstacles=boxes,
+        fixed_base_world_contact=bool(preparation["profile"].get("fixed_base_world_contact", False)),
     )
 
 

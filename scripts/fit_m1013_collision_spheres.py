@@ -20,12 +20,13 @@ import yaml
 
 ASSETS = Path(__file__).resolve().parents[1] / 'tiptop/doosan/assets/m1013_uon'
 PADDING = .001
+GRIPPER_MAX_EDGE = .01
 
 # Sparse link models; refine only the base/lower-arm clearance region below.
 COMPACT_COUNTS = {'base_link': 5, 'link_1': 3, 'link_2': 10, 'link_3': 3,
-                  'link_4': 8, 'link_5': 3, 'link_6': 1, 'gripper_body': 3,
-                  'gripper_spinner': 2, 'gripper_finger1': 4,
-                  'gripper_finger2': 4, 'gripper_finger3': 4}
+                  'link_4': 8, 'link_5': 3, 'link_6': 1, 'gripper_body': 10,
+                  'gripper_spinner': 4, 'gripper_finger1': 12,
+                  'gripper_finger2': 12, 'gripper_finger3': 12}
 
 
 def load_collision_mesh(assets, link):
@@ -85,9 +86,14 @@ def fit(assets):
             bounds = np.array([mesh.bounds[1, 2] + .007]) if link == 'base_link' else np.array(limits)
         else:
             triangles = mesh.triangles
+            if link.startswith('gripper_'):
+                vertices, faces = trimesh.remesh.subdivide_to_size(
+                    mesh.vertices, mesh.faces, max_edge=GRIPPER_MAX_EDGE, max_iter=12)
+                triangles = vertices[faces]
             centers = triangles.mean(axis=1)
+            areas = trimesh.triangles.area(triangles)
             samples = rng.choice(len(centers), size=min(4096, len(centers)),
-                                 p=mesh.area_faces / mesh.area, replace=True)
+                                 p=areas / areas.sum(), replace=True)
             seeds, _ = kmeans2(centers[samples], count, iter=30, minit='++', seed=2026, missing='raise')
             assignment, _ = vq(centers, seeds)
         fitted, excesses = [], []

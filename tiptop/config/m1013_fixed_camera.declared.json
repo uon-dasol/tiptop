@@ -1,0 +1,65 @@
+{
+  "calibrated": true,
+  "consistent": true,
+  "pose_source": "user_declared_isaac_lab",
+  "parent_link": "base_link",
+  "world_frame": "base_link",
+  "camera_frame": "undistorted_color_optical",
+  "camera_serial": "CPC8563000Z2",
+  "parent_from_camera": [
+    [
+      0.999993189566683,
+      -0.0010553286982054357,
+      0.003542767571239612,
+      -0.033981501658924905
+    ],
+    [
+      -0.0010603395899025786,
+      -0.9999984293017813,
+      0.0014128328027641726,
+      0.7600903821607952
+    ],
+    [
+      0.0035412711458183044,
+      -0.0014165796264790933,
+      -0.999992724415105,
+      1.0251693962478365
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "image_rotation_deg": 180,
+  "assumed_base_from_body": [
+    [
+      -1.0,
+      0.0,
+      0.0,
+      -0.01
+    ],
+    [
+      0.0,
+      -1.0,
+      0.0,
+      0.76
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      1.02
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "scene_source": "simulation/isaac_sim/scenes/lab_table_camera.usda",
+  "optics_source": "simulation/isaac_sim/config/gemini_336l_factory.json",
+  "note": "USER-DECLARED, NOT MEASURED. On 2026-10-29 the operator chose to use the Isaac lab geometry as the physical geometry and to calibrate later. Camera pose, gripper mount translation (zero), TCP (0.2368508 m), DB-grasp==TCP identity and table/structure boxes are unverified. The mount yaw -90 deg was visually compared with the real gripper by the operator. Replace with measured files when calibration is done. On 2026-11-03 the operator corrected the camera placement by 0.01m along world/base -X; orientation, Y and Z are unchanged. On 2026-11-03 the operator set upper-frame-underside to camera-front distance to 0.155m: camera front Z=1.02m, frame underside Z=1.175m. The hanging bracket extends to the unchanged frame. The operator corrected the frame underside height to 1.175m on 2026-11-03, retaining the 0.155m frame-to-front gap and camera front at Z=1.02m. On 2026-11-04 the operator moved the camera 0.01m toward world/base -Y: it now sits 3cm from the Center-side edge (Y=0.73m) and 5cm from the Right-side edge (Y=0.81m) of the 8cm robot-facing upper profile (Y=0.76m); X, Z and orientation are unchanged."
+}

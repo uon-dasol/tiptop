@@ -82,12 +82,12 @@ def test_world_rejection_preserves_self_collision_check_and_clear_recovery(plann
 def test_refined_spheres_cover_entire_collision_mesh_triangles():
     import trimesh
     import yaml
-    from scripts.fit_m1013_collision_spheres import ASSETS, load_collision_mesh
+    from scripts.fit_m1013_collision_spheres import ASSETS, GRIPPER_MAX_EDGE, load_collision_mesh
     spheres = yaml.safe_load((ASSETS / 'm1013_uon.yml').read_text())['robot_cfg']['kinematics']['collision_spheres']
     for link in spheres:
         mesh = load_collision_mesh(ASSETS, link)
         vertices, faces = trimesh.remesh.subdivide_to_size(
-            mesh.vertices, mesh.faces, max_edge=.02, max_iter=12)
+            mesh.vertices, mesh.faces, max_edge=GRIPPER_MAX_EDGE if link.startswith('gripper_') else .02, max_iter=12)
         centers = np.array([s['center'] for s in spheres[link]])
         radii = np.array([s['radius'] for s in spheres[link]])
         for start in range(0, len(faces), 512):
