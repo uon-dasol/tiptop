@@ -23,6 +23,7 @@ CASES = {
         "measured-place-multi-alt-disney_mickey_handled_dipper-c2435-r01",
     ),
 }
+PERCEPTION_MODULES = {"view": "view_grasps", "observe": "observe", "table-support": "table_support"}
 TOOLS = {
     "check-frames": ("check_adapter", "CPU: CAD/DB/계획 좌표 변환·물체 식별 검사"),
     "check-db": ("verify_local_db_bridge", "CPU: 세 종류 로컬 DB → 계획 좌표 변환 대조"),
@@ -54,8 +55,8 @@ def parser():
     run.add_argument("--isaac-python", type=Path, default=Path("/home/uon/isaac-sim/6.2.0/python.sh"))
     run.add_argument("--headless", action="store_true")
     run.add_argument("--execute", action="store_true", help="실제로 Isaac 실행; 미지정이면 미리보기만")
-    perception = commands.add_parser("perception", help="파지 DB 영상 뷰어 또는 새 카메라 인식 진단")
-    perception.add_argument("mode", choices=["view", "observe"])
+    perception = commands.add_parser("perception", help="파지 DB 영상 뷰어, 새 카메라 인식 진단, 책상 지지면 비교")
+    perception.add_argument("mode", choices=list(PERCEPTION_MODULES))
     perception.add_argument("args", nargs=argparse.REMAINDER)
     tool = commands.add_parser("tool", help="고급 진단 도구; --execute 전에는 설명만 출력")
     tool.add_argument("name", choices=list(TOOLS))
@@ -160,6 +161,7 @@ def main(argv=None):
                 print(f"run --case {name:6}  {title}: 집기·놓기 물리 실험")
             print("perception view     저장된 실제 영상에 DB 원점·축·접촉점 표시 (CPU)")
             print("perception observe  현재 가상 카메라 → SAM/깊이/CAD 자세/DB 확인 (GPU, Gemini 호출 없음)")
+            print("perception table-support  저장된 작업 출력으로 책상 지지면 방식 세 가지 비교 (CPU)")
             for name, (_, description) in TOOLS.items():
                 print(f"tool {name:18} {description}")
             return 0
@@ -169,8 +171,7 @@ def main(argv=None):
         if args.command == "run":
             return run_case(args, paths, env)
         if args.command == "perception":
-            module = "view_grasps" if args.mode == "view" else "observe"
-            return module_command(f"experiments.perception.{module}", [*args.args, *extra], env)
+            return module_command(f"experiments.perception.{PERCEPTION_MODULES[args.mode]}", [*args.args, *extra], env)
         module, description = TOOLS[args.name]
         print(description, flush=True)
         print(f"입력: {paths.DATA_ROOT}\n새 출력: {paths.WORK_ROOT}", flush=True)
