@@ -131,7 +131,7 @@
       0.0,
       -0.09135
     ],
-    "collision_margin_m": 0.002,
+    "collision_margin_m": 0.03,
     "mount_calibrated": true
   },
   "workspace": {
