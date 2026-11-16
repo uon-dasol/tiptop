@@ -44,7 +44,8 @@ def test_recorded_sweep_boxes_use_object_zero_frame_and_preserve_four_corners():
 
 
 @pytest.mark.parametrize('ambiguous', [False, True])
-def test_final_sweep_boxes_reconcile_pose_not_score_and_skip_ambiguous_sources(tmp_path, monkeypatch, ambiguous):
+@pytest.mark.parametrize('source_key', ['source_pregrasp_index', 'source_output_index'])
+def test_final_sweep_boxes_reconcile_pose_not_score_and_skip_ambiguous_sources(tmp_path, monkeypatch, ambiguous, source_key):
     from yourdfpy import URDF
     import tiptop.object_catalog as catalog
 
@@ -55,7 +56,7 @@ def test_final_sweep_boxes_reconcile_pose_not_score_and_skip_ambiguous_sources(t
     if not ambiguous:
         other[0, 3] += .1
     corners = np.array([[[0, 0, 0], [.01, 0, 0], [.01, .02, 0], [0, .02, 0]]]*3) + tcp[:3, 3]
-    rows = [dict(grasp_mat=pose.tolist(), score=score, scene_id=scene, source_pregrasp_index=index,
+    rows = [dict(grasp_mat=pose.tolist(), score=score, scene_id=scene, **{source_key: index},
                  grasp_boxes=corners.tolist())
             for pose, score, scene, index in [(tcp, .2, '0033', 321), (other, .9, '0099', 999)]]
     db = tmp_path / 'source-db.json'
@@ -76,7 +77,7 @@ def test_final_sweep_boxes_reconcile_pose_not_score_and_skip_ambiguous_sources(t
     else:
         assert final['db_reference']['index'] == 0
         assert final['db_reference']['scene_id'] == '0033'
-        assert final['db_reference']['source_pregrasp_index'] == 321
+        assert final['db_reference'][source_key] == 321
         assert final['db_reference']['position_error_mm'] == pytest.approx(0)
         assert len(final['grasp_boxes']) == 3
         # Side geometry may arrive after both the archive and the final plan.
@@ -314,6 +315,145 @@ def test_layers_preserve_rgb_and_missing_depth_is_black(tmp_path):
     overlay = np.asarray(Image.open(preview.directory / state["images"]["mask"]))
     assert overlay[2, 3, 3] > 0 and overlay[0, 0, 3] == 0
     assert state["depth_valid_percent"] == 0
+
+
+def test_sam3_target_moves_to_the_current_candidate_without_changing_scene_layers(tmp_path):
+    preview = snapshot(tmp_path)
+    boxes = [dict(label=f"bottle__instance_{i}", class_id="bottle", instance_index=i,
+                  box_2d=[0, i*250, 500, (i+1)*250]) for i in range(3)]
+    masks = np.zeros((3, 1, 6, 8), bool)
+    for i in range(3):
+        masks[i, 0, 1:4, i*2:i*2+2] = True
+    preview.update("detection", dict(bboxes=boxes, masks=masks, semantic_source="sam3_reference",
+                                     grounded_atoms=[dict(predicate="on", args=[boxes[0]["label"], "table"])]))
+    assert preview.state["target_label"] == boxes[0]["label"]
+    mask_file = preview.state["images"]["mask"]
+    preview.update("target", dict(label=boxes[1]["label"]))
+    state = json.loads((preview.directory / "state.json").read_text())
+    assert state["target_label"] == boxes[1]["label"]
+    assert state["boxes"] == boxes and state["images"]["mask"] == mask_file
+
+
+def test_old_worker_snapshots_use_the_saved_selected_instance_not_the_first_box(tmp_path):
+    from tiptop.scripts.serve_perception_viewer import snapshot_target_label
+
+    boxes = [dict(label=f"bottle__instance_{i}") for i in range(4)]
+    data = dict(detector="sam3_reference", boxes=boxes)
+    semantic = tmp_path / "semantic-task.json"
+    for index in (0, 1, 3):
+        semantic.write_text(json.dumps(dict(grounded_atoms=[dict(predicate="on", args=[boxes[index]["label"], "table"])])))
+        assert snapshot_target_label(data, tmp_path) == boxes[index]["label"]
+    # During verification the live target is newer than the saved semantic task.
+    data["target_label"] = boxes[2]["label"]
+    assert snapshot_target_label(data, tmp_path) == boxes[2]["label"]
+    del data["target_label"]
+    semantic.write_text("{")
+    (tmp_path / "registered-pose.json").write_text(json.dumps(dict(label=boxes[1]["label"])))
+    assert snapshot_target_label(data, tmp_path) == boxes[1]["label"]
+
+
+def test_obstacle_preview_uses_actual_world_mesh_and_samples_only_observed_points(tmp_path):
+    from types import SimpleNamespace
+    import trimesh
+    from curobo.geom.types import Mesh
+    from tiptop.perception_preview import build_obstacle_scene
+
+    hull = trimesh.creation.box(extents=[.03, .05, .09])
+    mesh = Mesh(name="target", vertices=hull.vertices.tolist(), faces=hull.faces.tolist(),
+                pose=[.2, .6, .08, 2**-.5, 0, 0, 2**-.5])
+    before = np.asarray(mesh.vertices).copy()
+    points = np.arange(90, dtype=float).reshape(-1, 3)/1000
+    boxes = [dict(label="target", class_id="bottle"), dict(label="other", class_id="bottle")]
+    objects = dict(target=dict(world_xyz=points), other=dict(world_xyz=[[np.nan, 0, 0], [.4, .7, .1]]))
+    scene = build_obstacle_scene(dict(target=mesh), objects, boxes, .03, "target", point_limit=8)
+    target, other = scene["objects"]
+    np.testing.assert_allclose(target["vertices"], hull.vertices @ np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]]) + [.2, .6, .08], atol=1e-5)
+    assert len(target["points"]) == 8 and target["observed_points"] == 30
+    assert target["collision_mesh"] and len(target["faces"]) == 12
+    assert not other["collision_mesh"] and other["points"] == [[.4, .7, .1]]
+    assert scene["target_label"] == "target" and scene["support_z_m"] == .03
+    np.testing.assert_array_equal(mesh.vertices, before)
+    np.testing.assert_array_equal(objects["target"]["world_xyz"], points)
+
+    preview = snapshot(tmp_path)
+    preview.obstacles(SimpleNamespace(table_cuboid=SimpleNamespace(pose=[0, 0, -.005], dims=[1, 1, .03]),
+                                     grasps={"target": {}}, object_meshes={"target": mesh}),
+                      dict(objects=objects, bboxes=boxes))
+    saved = json.loads((preview.directory / "obstacles.json").read_text())
+    assert saved == preview.state["obstacle_scene"]
+    assert saved["support_z_m"] == pytest.approx(.03)
+    assert len(saved["objects"]) == 2
+    preview.obstacles(SimpleNamespace(table_cuboid=SimpleNamespace(pose=[0, 0, -.005], dims=[1, 1, .03]),
+                                     grasps={"target": {}}, object_meshes={"target": mesh}),
+                      dict(objects=objects, bboxes=boxes, surrounding_obstacles=False),
+                      collision_labels={"target"})
+    saved = json.loads((preview.directory / "obstacles.json").read_text())
+    assert saved == preview.state["obstacle_scene"]
+    assert saved["surrounding_obstacles"] is False
+    assert [obj["label"] for obj in saved["objects"]] == ["target"]
+    assert len(boxes) == len(objects) == 2
+
+
+def test_obstacle_camera_matches_rgb_optical_projection():
+    from tiptop.perception_preview import rgb_camera_view
+
+    world_from_cam = np.array([[0, -1, 0, .2], [1, 0, 0, .6], [0, 0, 1, .4], [0, 0, 0, 1.]])
+    intrinsics = np.array([[500, 0, 320], [0, 510, 240], [0, 0, 1.]])
+    camera = rgb_camera_view(world_from_cam, intrinsics, 640, 480)
+    point_cam = np.array([.1, -.2, 1., 1.])
+    world = world_from_cam @ point_cam
+    restored = np.asarray(camera["camera_from_world"]) @ world
+    pixel = np.asarray(camera["intrinsics"]) @ restored[:3]
+    np.testing.assert_allclose(pixel[:2]/pixel[2], [370, 138])
+    assert camera["width"] == 640 and camera["height"] == 480
+
+
+def test_viewer_recovers_rgb_camera_for_each_new_task_from_an_older_worker(tmp_path):
+    from tiptop.perception_preview import rgb_camera_view
+
+    server = make_server(tmp_path, port=0)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        for index in (1, 2):
+            output = tmp_path / f"task-{index}"
+            preview = snapshot(output, str(index))
+            # The observation packet already includes the 180-degree RGB rotation.
+            world_from_cam = np.diag([-1., -1., 1., 1.])
+            world_from_cam[:3, 3] = [index*.1, .7, 1.]
+            intrinsics = np.array([[500., 0, 317.8], [0, 510., 250.3], [0, 0, 1.]])
+            np.savez(output / "observation.npz", world_from_cam=world_from_cam, intrinsics=intrinsics)
+            preview.update("obstacles", dict(objects=[]))
+            with urlopen(f"http://127.0.0.1:{server.server_port}/state") as response:
+                data = json.load(response)
+            assert data["observation_id"] == str(index)
+            assert data["obstacle_scene"]["camera"] == rgb_camera_view(
+                world_from_cam, intrinsics, preview.state["width"], preview.state["height"])
+            # Recovering display metadata does not alter the saved worker state.
+            assert "camera" not in json.loads((preview.directory / "state.json").read_text())["obstacle_scene"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
+
+
+@pytest.mark.parametrize("rotation_deg", [0, 180])
+def test_obstacle_camera_respects_the_already_rotated_rgb_packet(rotation_deg):
+    from tiptop.perception_preview import rgb_camera_view
+
+    width, height = 640, 480
+    intrinsics = np.array([[500., 0, 301.2], [0, 510., 228.7], [0, 0, 1.]])
+    native_from_rotated = np.eye(4)
+    native_pixel = np.array([351.2, 126.7])
+    if rotation_deg == 180:
+        native_from_rotated[:2, :2] *= -1
+        intrinsics[0, 2] = width - 1 - intrinsics[0, 2]
+        intrinsics[1, 2] = height - 1 - intrinsics[1, 2]
+    camera = rgb_camera_view(native_from_rotated, intrinsics, width, height)
+    point = np.asarray(camera["camera_from_world"]) @ [.1, -.2, 1., 1.]
+    pixel = np.asarray(camera["intrinsics"]) @ point[:3]
+    expected = [width-1, height-1] - native_pixel if rotation_deg else native_pixel
+    np.testing.assert_allclose(pixel[:2]/pixel[2], expected)
 
 
 @pytest.mark.parametrize("scene_first", [True, False])

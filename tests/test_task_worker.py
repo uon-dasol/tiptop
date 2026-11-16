@@ -34,20 +34,20 @@ def test_arbitrary_tasks_share_worker_but_each_request_gets_fresh_options_and_lo
     async def check():
         calls, prepared = [], []
         async def run(args):
-            calls.append((args.task, args.execute, args.max_approach_tilt_deg))
+            calls.append((args.task, args.execute, args.max_approach_tilt_deg, args.surrounding_obstacles))
             print('TASK_OUTPUT '+args.task)
             return dict(success=True, task=args.task, process_id=os.getpid())
         worker = TaskWorker(parse, run, before_task=lambda: prepared.append(True))
         path = tmp_path/'worker.sock'
         async with await asyncio.start_unix_server(worker.handle, path=str(path)):
-            for name, extra in [('C', ['--max-approach-tilt-deg','20']), ('A', []), ('C', [])]:
+            for name, extra in [('C', ['--max-approach-tilt-deg','20']), ('A', ['--no-surrounding-obstacles']), ('C', [])]:
                 reader, writer = await connect(path, ['--task',name,'--perception-mode','sam3_reference',*extra])
                 data, logs = await result(reader)
                 assert data['process_id'] == os.getpid() and data['task'] == name
                 assert 'TASK_OUTPUT '+name in logs
                 writer.close(); await writer.wait_closed()
             await worker.close()
-        assert calls == [('C',False,20),('A',False,3),('C',False,3)]
+        assert calls == [('C',False,20,True),('A',False,3,False),('C',False,3,True)]
         assert len(prepared) == 3
     asyncio.run(check())
 

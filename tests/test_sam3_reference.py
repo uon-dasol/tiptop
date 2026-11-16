@@ -62,12 +62,14 @@ def packet(h=4, w=6):
     )
 
 
-def test_highest_score_keeps_canonical_class_and_original_coordinates():
+def test_all_instances_are_retained_with_unique_labels_and_original_coordinates():
     result = reference.decode_reference_result(packet(), (4, 6, 3), "black_pepper_shaker")
-    assert result["bboxes"] == [dict(label="black_pepper_shaker", box_2d=[500, 500, 1000, 1000])]
-    assert result["masks"].shape == (1, 1, 4, 6)
-    assert result["masks"][0, 0, 2:, 3:].all()
-    assert result["grounded_atoms"] == [dict(predicate="on", args=["black_pepper_shaker", "table"])]
+    assert [box["label"] for box in result["bboxes"]] == ["black_pepper_shaker__instance_0", "black_pepper_shaker__instance_1"]
+    assert [box["instance_index"] for box in result["bboxes"]] == [0, 1]
+    assert result["bboxes"][1]["box_2d"] == [500, 500, 1000, 1000]
+    assert all(box["class_id"] == "black_pepper_shaker" for box in result["bboxes"])
+    np.testing.assert_array_equal(result["masks"], packet()["masks"])
+    assert result["grounded_atoms"] == [dict(predicate="on", args=["black_pepper_shaker__instance_1", "table"])]
 
 
 @pytest.mark.parametrize("change", ["missing", "resolution", "class", "score", "mask", "box"])
@@ -97,7 +99,7 @@ def test_reference_frontend_uses_each_current_image_without_gemini_or_sam2(monke
 
     monkeypatch.setattr(gemini, "detect_and_translate_async", forbidden)
     monkeypatch.setattr(sam2, "sam2_segment_objects", lambda *a: pytest.fail("SAM2 must be bypassed"))
-    sent = []
+    sent, thresholds = [], [0.5, 0.3]
 
     class Response:
         status = 200
@@ -118,9 +120,10 @@ def test_reference_frontend_uses_each_current_image_without_gemini_or_sam2(monke
             with np.load(io.BytesIO(data), allow_pickle=False) as request:
                 sent.append(request["rgb"].copy())
                 assert str(request["class_id"]) == "black_pepper_shaker"
+                assert float(request["confidence_threshold"]) == thresholds[len(sent) - 1]
             return Response()
 
-    for color in (31, 97):
+    for color, threshold in zip((31, 97), thresholds):
         frame = Frame("test", color, np.full((4, 6, 3), color, np.uint8), np.eye(3), np.ones((4, 6), np.float32))
         result = asyncio.run(
             run_visual_perception(
@@ -129,10 +132,12 @@ def test_reference_frontend_uses_each_current_image_without_gemini_or_sam2(monke
                 np.eye(4),
                 "black_pepper_shaker를 집고 제자리에 놓아",
                 perception_mode="sam3_reference",
+                sam3_confidence_threshold=threshold,
             )
         )
         assert result["semantic_source"] == "sam3_reference"
-        assert result["objects"]["black_pepper_shaker"]["valid_pixels"] == 6
+        assert result["objects"]["black_pepper_shaker__instance_1"]["valid_pixels"] == 6
+        assert len(result["objects"]) == 2
     assert len(sent) == 2
     assert np.all(sent[0] == 31) and np.all(sent[1] == 97)
 
@@ -163,7 +168,7 @@ def test_reference_output_is_accepted_by_the_existing_foundationpose_client():
             pass
 
         async def json(self):
-            return dict(camera_from_cad=pose.tolist(), class_id=label)
+            return dict(camera_from_cad=pose.tolist(), class_id=entry["class_id"])
 
     class Session:
         def post(self, url, *, data, timeout):
@@ -184,7 +189,7 @@ def test_reference_output_is_accepted_by_the_existing_foundationpose_client():
             detection["masks"][0, 0],
             mesh_path=entry["cad"],
             mesh_scale=entry["cad_scale_to_m"],
-            class_id=label,
+            class_id=entry["class_id"],
             world_from_cam=np.eye(4),
         )
     )
@@ -235,3 +240,203 @@ def test_cli_permissions_follow_selected_mode(monkeypatch, tmp_path, extra, vali
         with pytest.raises(SystemExit) as error:
             runner.main()
         assert error.value.code == 2 and not called
+
+
+def several(scores, h=4, w=6):
+    n = len(scores)
+    masks = np.zeros((n, 1, h, w), bool)
+    boxes = np.zeros((n, 4))
+    for i in range(n):
+        masks[i, 0, :2, : 1 + i % 3] = True
+        boxes[i] = [0, 0, 1 + i % 3, 2]
+    return dict(
+        masks=masks, scores=np.array(scores), boxes_xyxy=boxes,
+        metadata=np.array(json.dumps(dict(class_id="black_pepper_shaker", confidence_threshold=0.5, reference_scene="Lab"))),
+    )
+
+
+def test_candidates_follow_the_score_order_up_to_the_trial_limit():
+    scores = [0.6, 0.9, 0.85, 0.5, 0.7, 0.65, 0.55, 0.95, 0.52, 0.8, 0.75]
+    expected = sorted(range(len(scores)), key=lambda i: -scores[i])[: reference.MAX_REFERENCE_TRIALS]
+    result = reference.decode_reference_result(several(scores), (4, 6, 3), "black_pepper_shaker")
+    assert len(scores) > reference.MAX_REFERENCE_TRIALS
+    assert [c["index"] for c in result["reference_candidates"]] == expected
+    assert result["reference_diagnostics"]["trial_indices"] == expected
+    assert result["masks"].shape[0] == len(scores)
+    assert result["reference_diagnostics"]["scene_indices"] == list(range(len(scores)))
+    assert result["bboxes"][7] == result["reference_candidates"][0]["bboxes"][0]
+
+
+def test_equal_scores_keep_the_server_order_and_trials_are_capped():
+    result = reference.decode_reference_result(several([0.8] * 10), (4, 6, 3), "black_pepper_shaker")
+    assert [c["index"] for c in result["reference_candidates"]] == list(range(reference.MAX_REFERENCE_TRIALS))
+    assert len(result["bboxes"]) == 10
+
+
+def test_unusable_secondary_candidates_are_skipped_not_fatal():
+    value = several([0.9, 0.85, 0.8, 0.7])
+    value["masks"][1] = False
+    value["boxes_xyxy"][2, 2] = 99
+    result = reference.decode_reference_result(value, (4, 6, 3), "black_pepper_shaker")
+    assert [c["index"] for c in result["reference_candidates"]] == [0, 3]
+    assert [b["instance_index"] for b in result["bboxes"]] == [0, 3]
+    np.testing.assert_array_equal(result["masks"], value["masks"][[0, 3]])
+
+
+def test_switching_candidate_rebuilds_the_object_points_and_selection():
+    from tiptop.perception_wrapper import select_reference_candidate
+
+    detection = reference.decode_reference_result(several([0.9, 0.88]), (4, 6, 3), "black_pepper_shaker")
+    depth = dict(
+        valid_depth_mask=np.ones((4, 6), bool), xyz_map=np.zeros((4, 6, 3)), rgb_map=np.zeros((4, 6, 3)),
+    )
+    results = {**depth, **detection}
+    switched = select_reference_candidate(results, detection["reference_candidates"][1])
+    assert switched["reference_diagnostics"]["selected_index"] == 1
+    assert switched["objects"]["black_pepper_shaker__instance_1"]["mask_pixels"] == int(several([0.9, 0.88])["masks"][1].sum())
+    assert switched["masks"] is results["masks"]
+    assert len(switched["objects"]) == 2
+    assert switched["objects"]["black_pepper_shaker__instance_0"]["mask_pixels"] == 2
+    assert switched["bboxes"] is results["bboxes"]
+    assert switched["grounded_atoms"] == [dict(predicate="on", args=["black_pepper_shaker__instance_1", "table"])]
+    assert results["grounded_atoms"] == [dict(predicate="on", args=["black_pepper_shaker__instance_0", "table"])]
+    assert results["reference_diagnostics"]["selected_index"] == 0
+
+
+def test_terminal_log_distinguishes_target_trials_from_retained_scene_masks(capsys):
+    result = reference.decode_reference_result(several([0.99 - 0.01 * i for i in range(10)]), (4, 6, 3), "black_pepper_shaker")
+    reference.log_reference_detection("black_pepper_shaker", result["reference_diagnostics"])
+    text = capsys.readouterr().out
+    assert "[SAM3]" in text and "검증 대상" in text and "장면 유지 · 파지 검증 생략" in text
+    assert "장면 마스크 10개 유지" in text
+
+
+def test_no_candidate_failure_is_logged_with_the_threshold(capsys):
+    empty = several([])
+    empty.update(masks=np.zeros((0, 1, 4, 6), bool), boxes_xyxy=np.zeros((0, 4)))
+    with pytest.raises(reference.ReferenceDetectionError) as error:
+        reference.decode_reference_result(empty, (4, 6, 3), "black_pepper_shaker")
+    reference.log_reference_failure("black_pepper_shaker", error.value)
+    text = capsys.readouterr().out
+    assert "[SAM3]" in text and "점수 > 0.50" in text and "후보가 없습니다" in text
+
+
+
+def test_server_value_that_differs_from_the_request_is_flagged(capsys):
+    result = reference.decode_reference_result(several([0.9]), (4, 6, 3), "black_pepper_shaker")
+    reference.log_reference_detection("black_pepper_shaker", result["reference_diagnostics"], 0.3)
+    assert "서버를 재시작" in capsys.readouterr().out
+    reference.log_reference_detection("black_pepper_shaker", result["reference_diagnostics"], 0.5)
+    assert "서버를 재시작" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("flag, value", [("--sam3-confidence-threshold", "1.5"), ("--sam3-confidence-threshold", "nan")])
+def test_sam3_confidence_threshold_option_is_validated(monkeypatch, tmp_path, flag, value):
+    from tiptop.scripts import run_known_pick_place as runner
+
+    monkeypatch.setattr(sys, "argv", ["run", "--output", str(tmp_path)])
+    assert runner.parse_args().sam3_confidence_threshold == reference.DEFAULT_CONFIDENCE_THRESHOLD
+    monkeypatch.setattr(sys, "argv", ["run", "--output", str(tmp_path), flag, value])
+    with pytest.raises(SystemExit):
+        runner.parse_args()
+
+
+def test_candidate_crops_cover_every_detected_candidate_with_its_outcome(tmp_path):
+    rgb = np.random.default_rng(0).integers(0, 255, (120, 160, 3), dtype=np.uint8)
+    diagnostics = dict(
+        candidate_scores=[0.62, 0.59, 0.55, 0.30, 0.54],
+        ranking_scores=[0.62, 0.59, 0.55, 0.30, 0.54],
+        candidate_boxes_xyxy=[[10, 10, 40, 40], [50, 10, 80, 40], [90, 10, 120, 40], [10, 60, 40, 90], [50, 60, 80, 90]],
+        trial_indices=[0, 1, 2],
+    )
+    trials = [
+        dict(rank=1, candidate_index=0, silhouette_iou=0.66, accepted=False),
+        dict(rank=2, candidate_index=1, silhouette_iou=0.81, accepted=True),
+    ]
+    reference.save_candidate_crops(rgb, diagnostics, trials, tmp_path / "candidates")
+    names = sorted(path.name for path in (tmp_path / "candidates").iterdir())
+    assert names == [
+        "overview.png", "rank01_rejected_score0.620_idx0.png", "rank02_accepted_score0.590_idx1.png",
+        "rank03_skipped_score0.550_idx2.png", "rank04_skipped_score0.540_idx4.png", "rank05_skipped_score0.300_idx3.png",
+    ]
+
+
+def test_reference_image_is_copied_with_its_exemplar_boxes_drawn(tmp_path):
+    import cv2
+
+    source = tmp_path / "ref" / "obj" / "0000.png"
+    source.parent.mkdir(parents=True)
+    cv2.imwrite(str(source), np.zeros((60, 80, 3), np.uint8))
+    source.with_suffix(".json").write_text(json.dumps(dict(bboxes=[[5, 5, 20, 20], [40, 30, 70, 55]])))
+    out = tmp_path / "candidates"
+    reference.save_reference_image(dict(reference_image=str(source)), out)
+    assert (out / "reference.png").read_bytes() == source.read_bytes()
+    drawn = cv2.imread(str(out / "reference_boxes.png"))
+    assert drawn.shape == (60, 80, 3) and drawn.any() and not cv2.imread(str(source)).any()
+
+
+def test_appearance_similarity_favours_the_colour_of_the_reference_exemplars(tmp_path):
+    import cv2
+
+    source = tmp_path / "ref" / "0000.png"
+    source.parent.mkdir()
+    image = np.full((100, 160, 3), 20, np.uint8)
+    image[10:40, 10:40] = (30, 200, 40)
+    image[50:80, 60:90] = (30, 200, 40)
+    cv2.imwrite(str(source), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+    source.with_suffix(".json").write_text(json.dumps(dict(bboxes=[[10, 10, 40, 40], [60, 50, 90, 80]])))
+    scene = np.full((100, 160, 3), 20, np.uint8)
+    scene[10:40, 10:40] = (40, 190, 50)   # same colour family
+    scene[10:40, 100:130] = (220, 40, 40)  # a red object
+    similarity = reference.appearance_scores(scene, [[10, 10, 40, 40], [100, 10, 130, 40], [0, 60, 10, 70]], source)
+    assert similarity[0] > 0.9 and similarity[1] < 0.2 and similarity[2] == 0.0   # the last box is only table
+
+
+def test_appearance_ranking_reorders_candidates_and_is_recorded():
+    value = several([0.60, 0.58, 0.40])
+    similarity = np.array([0.1, 0.9, 0.5])
+    off = reference.decode_reference_result(value, (4, 6, 3), "black_pepper_shaker")
+    on = reference.decode_reference_result(
+        value, (4, 6, 3), "black_pepper_shaker", appearance_fn=lambda metadata, boxes: similarity, appearance_weight=1.0
+    )
+    assert [c["index"] for c in off["reference_candidates"]] == [0, 1, 2]
+    assert [c["index"] for c in on["reference_candidates"]] == [1, 2, 0]
+    assert on["reference_diagnostics"]["ranking_scores"] == pytest.approx([0.7, 1.48, 0.9])
+    assert on["reference_diagnostics"]["appearance_weight"] == 1.0 and on["reference_candidates"][0]["appearance"] == 0.9
+    half = reference.decode_reference_result(
+        value, (4, 6, 3), "black_pepper_shaker", appearance_fn=lambda metadata, boxes: similarity, appearance_weight=0.0
+    )
+    assert [c["index"] for c in half["reference_candidates"]] == [0, 1, 2]
+
+
+def test_appearance_options_are_validated(monkeypatch, tmp_path):
+    from tiptop.scripts import run_known_pick_place as runner
+
+    monkeypatch.setattr(sys, "argv", ["run", "--output", str(tmp_path)])
+    args = runner.parse_args()
+    assert args.appearance_ranking is False and args.appearance_weight == 1.0
+    monkeypatch.setattr(sys, "argv", ["run", "--output", str(tmp_path), "--appearance-ranking", "--appearance-weight", "-1"])
+    with pytest.raises(SystemExit):
+        runner.parse_args()
+
+
+def test_terminal_log_reports_the_appearance_ranking_and_whether_it_changed_the_winner(capsys):
+    value = several([0.60, 0.58, 0.40])
+    metadata = json.loads(str(value["metadata"]))
+    metadata.update(reference_box_count=10)
+    value["metadata"] = np.array(json.dumps(metadata))
+    changed = reference.decode_reference_result(
+        value, (4, 6, 3), "black_pepper_shaker", appearance_fn=lambda m, b: np.array([0.1, 0.9, 0.5]), appearance_weight=1.0
+    )
+    reference.log_reference_detection("black_pepper_shaker", changed["reference_diagnostics"])
+    text = capsys.readouterr().out
+    assert "외형 유사도 보정 켜짐" in text and "가중치 1" in text and "참조 박스 10개" in text
+    assert "순위 변경: SAM3 점수 1위 idx0" in text and "합산 1위 idx1" in text and "합산 1.4800 (SAM3 0.5800 + 외형 0.900)" in text
+    same = reference.decode_reference_result(
+        value, (4, 6, 3), "black_pepper_shaker", appearance_fn=lambda m, b: np.array([0.9, 0.5, 0.1]), appearance_weight=1.0
+    )
+    reference.log_reference_detection("black_pepper_shaker", same["reference_diagnostics"])
+    assert "1위는 그대로입니다" in capsys.readouterr().out
+    off = reference.decode_reference_result(value, (4, 6, 3), "black_pepper_shaker")
+    reference.log_reference_detection("black_pepper_shaker", off["reference_diagnostics"])
+    assert "외형" not in capsys.readouterr().out

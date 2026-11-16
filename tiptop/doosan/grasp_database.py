@@ -23,10 +23,41 @@ def _document(path, mtime_ns, size):
     return json.loads(Path(path).read_text())
 
 
+def database_grasp_matrices(document):
+    """Return object-frame grasps at the recorded target origin.
+
+    The single-object format already stores this origin in grasp_mat. V2/UON
+    stores a base pose instead: target_points lies 237 mm along its local +Z.
+    Use that recorded point after validating the offset; do not translate in
+    world Z or change the source document, rotations, scores or TCP calibration.
+    """
+    rows = document["data"]
+    grasps = np.stack([_rigid_transform(row["grasp_mat"], "DB grasp") for row in rows])
+    metadata = document.get("metadata", {})
+    if metadata.get("schema") != "dataset_v2_object_grasp_compact":
+        return grasps
+    if (metadata.get("schema_version") != 1 or metadata.get("gripper_model") != "UON_3finger_gripper"
+            or metadata.get("coordinate_frame") != "object_zero_pose"):
+        raise ValueError("Unsupported V2 grasp schema version, gripper or coordinate frame")
+    try:
+        targets = np.asarray([row["target_points"] for row in rows], dtype=float)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("V2 grasp correction requires finite target_points") from error
+    if targets.shape != (len(rows), 3) or not np.isfinite(targets).all():
+        raise ValueError("V2 grasp correction requires finite [N, 3] target_points")
+    local_offsets = np.einsum("nji,nj->ni", grasps[:, :3, :3], targets - grasps[:, :3, 3])
+    # JSON coordinates are rounded; observed errors are below 2 micrometres.
+    if not np.allclose(local_offsets, [0.0, 0.0, 0.237], atol=1e-5, rtol=0):
+        raise ValueError("V2 target_points must be 237 mm along the grasp base's local +Z")
+    grasps[:, :3, 3] = targets
+    return grasps
+
+
 @lru_cache(maxsize=4)
 def _ranked_candidates(path, mtime_ns, size):
-    rows = _document(path, mtime_ns, size)["data"]
-    db_grasps = np.stack([_rigid_transform(row["grasp_mat"], "DB grasp") for row in rows])
+    document = _document(path, mtime_ns, size)
+    rows = document["data"]
+    db_grasps = database_grasp_matrices(document)
     scores = np.asarray([row["score"] for row in rows], np.float32)
     if not np.isfinite(scores).all():
         raise ValueError("Invalid DB ranking score")
@@ -36,7 +67,8 @@ def _ranked_candidates(path, mtime_ns, size):
         scores[order],
         order,
         [rows[index]["scene_id"] for index in order],
-        [rows[index]["source_pregrasp_index"] for index in order],
+        [rows[index].get("source_pregrasp_index") for index in order],
+        [rows[index].get("source_output_index") for index in order],
     )
 
 
@@ -80,7 +112,7 @@ def load_database_grasps(
     key = _file_key(path)
     document = _document(*key)
     _validate_document(document, class_id)
-    db_grasps, scores, order, scene_ids, pregrasp_indices = _ranked_candidates(*key)
+    db_grasps, scores, order, scene_ids, pregrasp_indices, output_indices = _ranked_candidates(*key)
     world_tcp = world_cad @ cad_db @ db_grasps @ grasp_tcp
     return dict(
         world_from_tcp=world_tcp,
@@ -89,6 +121,7 @@ def load_database_grasps(
         candidate_indices=order.copy(),
         source_scene_ids=list(scene_ids),
         source_pregrasp_indices=list(pregrasp_indices),
+        source_output_indices=list(output_indices),
         pose_source=pose_source,
         real_tcp_calibrated=False,
         collision_filtered=False,

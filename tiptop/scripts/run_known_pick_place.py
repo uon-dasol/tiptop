@@ -34,6 +34,7 @@ import re
 import threading
 import uuid
 from copy import copy
+from contextlib import nullcontext
 from itertools import count
 from pathlib import Path
 from urllib.parse import urlencode
@@ -46,12 +47,26 @@ from PIL import Image
 from tiptop.config import tiptop_cfg
 from tiptop.perception.cameras.stereo import decode_camera_request
 from tiptop.perception.robot_filter import points_inside_spheres
+from tiptop.perception.sam3_reference import DEFAULT_CONFIDENCE_THRESHOLD
+from tiptop.task_logging import LOG_OWNER_ENV, capture_terminal_log
 from tiptop.task_timing import TaskTimings
 from tiptop.console import timing_line
 from tiptop.serialization import savez_fast
 from tiptop.utils import NumpyEncoder
 
 _TASK_SEQUENCE = count(1)
+
+
+_ELAPSED = re.compile(r"\b\d+(?:\.\d+)?\s*(?:ms|s|seconds?)\b", re.IGNORECASE)
+
+
+class _TiptopProgressFilter(logging.Filter):
+    """Hide tiptop's INFO progress messages from the console; warnings and the elapsed-time lines stay."""
+
+    def filter(self, record):
+        return not (
+            record.name.startswith("tiptop.") and record.levelno == logging.INFO and not _ELAPSED.search(record.getMessage())
+        )
 
 
 class _TimingFormatter(logging.Formatter):
@@ -77,11 +92,17 @@ class _TimingFormatter(logging.Formatter):
     def format(self, record):
         text = super().format(record)
         if (record.name.startswith("tiptop.") and record.levelno <= logging.INFO
-                and re.search(r"\b\d+(?:\.\d+)?\s*(?:ms|s|seconds?)\b", record.getMessage(), re.IGNORECASE)):
+                and _ELAPSED.search(record.getMessage())):
             module = record.name.rsplit(".", 1)[-1]
             label = self.module_labels.get(module, module)
             return f"\033[32m[{label}] {text}\033[0m"
         return text
+
+
+def quiet_noisy_loggers():
+    """Hide cuRobo's solver chatter (errors only) and cuTAMP's progress info (warnings and errors stay)."""
+    logging.getLogger("curobo").setLevel(logging.ERROR)
+    logging.getLogger("cutamp").setLevel(logging.WARNING)
 
 
 def configured_full_table(fixed_obstacles):
@@ -292,9 +313,12 @@ async def run(args):
                 perception_mode=mode,
                 sam3_url=getattr(args, "sam3_url", None),
                 reference_scene=getattr(args, "reference_scene", None),
+                sam3_confidence_threshold=getattr(args, "sam3_confidence_threshold", None),
+                appearance_weight=args.appearance_weight if getattr(args, "appearance_ranking", False) else None,
                 pick_place_bounds_xy=pick_place_bounds,
                 preview=args._preview,
                 background_tasks=args._background,
+                surrounding_obstacles=getattr(args, "surrounding_obstacles", True),
             )
             args._timings["perception"] = time.perf_counter() - perception_started
         except APIError as error:
@@ -551,6 +575,14 @@ async def run_preparation_only(args):
 
 
 async def run_task(args):
+    """Reserve a fresh task directory and persist logs through completion/cancellation."""
+    args.output = reserve_output_directory(args.output)
+    external = getattr(args, "_terminal_log_external", False) or os.environ.get(LOG_OWNER_ENV) == "launcher"
+    with nullcontext() if external else capture_terminal_log(args.output / "terminal.log"):
+        return await _run_task(args)
+
+
+async def _run_task(args):
     """A failure ends this instruction; the next instruction starts fresh."""
     timing = args._timing_trace = TaskTimings()
     task_index = next(_TASK_SEQUENCE)
@@ -559,7 +591,6 @@ async def run_task(args):
     args._planning_input_save = None
     args._execution_timings = {}
     args._preview = None
-    args.output = reserve_output_directory(args.output)
     print(f"TASK_OUTPUT {args.output}", flush=True)
     args._stage, args._observation_id = "setup", None
     args._timings = {}
@@ -692,11 +723,30 @@ def parse_args(argv=None):
     parser.add_argument("--perception-mode", choices=["gemini_er", "sam3_reference"], default=None)
     parser.add_argument("--sam3-url", help="Override the SAM3 reference server URL")
     parser.add_argument("--reference-scene", help="Reference scene relative to the SAM3 server reference root")
+    parser.add_argument(
+        "--appearance-ranking", action="store_true",
+        help="SAM3 mode: rank candidates by SAM3 score plus --appearance-weight times their colour similarity "
+             "to the reference boxes, before verifying them",
+    )
+    parser.add_argument(
+        "--appearance-weight", type=float, default=1.0,
+        help="Weight of the colour similarity (0-1) added to the SAM3 score when --appearance-ranking is set (default: 1)",
+    )
+    parser.add_argument(
+        "--sam3-confidence-threshold", type=float, default=DEFAULT_CONFIDENCE_THRESHOLD,
+        help=f"SAM3 mode: keep only candidates scoring above this (default: {DEFAULT_CONFIDENCE_THRESHOLD}); "
+             "needs a SAM3 server that accepts the per-request value",
+    )
     parser.add_argument("--preload-objects", nargs="+", metavar="CLASS_ID",
                         help="Prepare this sequence's catalog objects, or all, before starting tasks")
     parser.add_argument("--prepare-only", action="store_true",
                         help="Prepare caches/references only; no camera, inference, gateway or robot requests")
     parser.add_argument("--viewer", action="store_true", help="Publish RGB/depth, masks and the final planned grasp to the local viewer")
+    parser.add_argument(
+        "--surrounding-obstacles", action=argparse.BooleanOptionalAction, default=True,
+        help="Register all perceived objects for collision checking (default: on); "
+             "--no-surrounding-obstacles keeps only the selected grasp target. Table and fixed structures remain checked",
+    )
     parser.add_argument(
         "--camera-preparation", type=Path,
         help="Optional virtual camera config assertion; otherwise use the live backend configuration (legacy: wrist)",
@@ -713,7 +763,7 @@ def parse_args(argv=None):
     parser.add_argument("--execute", action="store_true")
     parser.add_argument(
         "--cad-mask-min-iou", type=float, default=0.75,
-        help="Minimum convex CAD/mask silhouette IoU in [0,1] (default: 0.75)",
+        help="Minimum CAD silhouette/mask IoU in [0,1] (default: 0.75); mask pixels outside the CAD that are as dark as the table (shadow) are ignored",
     )
     parser.add_argument(
         "--check",
@@ -774,6 +824,13 @@ def parse_args(argv=None):
     parser.add_argument("--min-engagement-depth-m", type=float, default=defaults.min_engagement_depth_m,
                         help="Minimum depth of the fingertip plane below the estimated object top, metres "
                              "(default: 0.02); 0 only requires the fingertips at or below the top")
+    parser.add_argument("--num-particles", type=int, default=defaults.num_particles,
+                        help="Most IK-feasible DB grasps, best score first, handed to cuTAMP, one particle each "
+                             f"(default: {defaults.num_particles}); more grasps take longer to plan")
+    parser.add_argument("--robot-world-tolerance-m", type=float, default=defaults.robot_world_tolerance_m,
+                        help="Summed depth, metres, by which robot collision spheres may overlap obstacles in cuTAMP's "
+                             f"constraint check (default: {defaults.robot_world_tolerance_m:g}; cuTAMP's own default is 0.001). "
+                             "The motion planner still checks the executed path")
     parser.add_argument("--table-support", choices=TABLE_SUPPORT_MODES, default="ransac-cad",
                         help="How the table support height is obtained: RANSAC plane scored by the posed-CAD bottoms "
                              "(ransac-cad, default), RANSAC scored by the mask-bottom points (ransac-mask), or the "
@@ -806,6 +863,10 @@ def parse_args(argv=None):
         parser.error("--max-approach-tilt-deg must be finite degrees in [0, 90]")
     if not np.isfinite(args.cad_mask_min_iou) or not 0 <= args.cad_mask_min_iou <= 1:
         parser.error("--cad-mask-min-iou must be finite and between 0 and 1")
+    if not np.isfinite(args.appearance_weight) or args.appearance_weight < 0:
+        parser.error("--appearance-weight must be finite and not negative")
+    if not np.isfinite(args.sam3_confidence_threshold) or not 0 <= args.sam3_confidence_threshold <= 1:
+        parser.error("--sam3-confidence-threshold must be finite and between 0 and 1")
     if args.active_task and args.allow_gemini_once:
         parser.error("Choose a new Gemini call OR continuation, not both")
     if args.interactive and (args.active_task or (args.perception_mode == "gemini_er" and not args.allow_gemini_once)):
@@ -821,7 +882,9 @@ def main():
     args = parse_args()
     console = logging.StreamHandler()
     console.setFormatter(_TimingFormatter("%(levelname)s:%(name)s:%(message)s"))
+    console.addFilter(_TiptopProgressFilter())
     logging.basicConfig(level=logging.INFO, handlers=[console])
+    quiet_noisy_loggers()
     try:
         if args.prepare_only:
             result = asyncio.run(run_preparation_only(args))

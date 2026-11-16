@@ -15,7 +15,7 @@ from cutamp.constraint_checker import ConstraintChecker
 from cutamp.cost_reduction import CostReducer
 from cutamp.envs import TAMPEnvironment
 from cutamp.scripts.utils import default_constraint_to_mult, default_constraint_to_tol
-from cutamp.task_planning.constraints import StablePlacement
+from cutamp.task_planning.constraints import Collision, StablePlacement
 from jaxtyping import Float
 
 from tiptop.utils import NumpyEncoder
@@ -92,6 +92,7 @@ def run_planning(
     *,
     placement_support_tolerance: float = 1e-2,
     placement_xy_tolerance: float = 1e-2,
+    robot_world_tolerance: float | None = None,
 ) -> tuple[list | None, float, str | None]:
     """Run cuTAMP planning and return (plan, planning_time_seconds, failure_reason).
 
@@ -102,6 +103,8 @@ def run_planning(
         or min(placement_support_tolerance, placement_xy_tolerance) <= 0
     ):
         raise ValueError("Placement tolerances must be positive finite metres")
+    if robot_world_tolerance is not None and (not np.isfinite(robot_world_tolerance) or robot_world_tolerance <= 0):
+        raise ValueError("Robot-to-world collision tolerance must be positive finite metres")
     # Nested dictionaries belong to upstream. Per-task settings must not leak
     # into the next task in this process.
     constraint_to_tol = deepcopy(default_constraint_to_tol)
@@ -110,6 +113,8 @@ def run_planning(
         constraint_to_tol[StablePlacement.type][f"{surface.name}_in_xy"] = placement_xy_tolerance
         constraint_to_tol[StablePlacement.type][f"{surface.name}_support"] = placement_support_tolerance
         constraint_to_mult[StablePlacement.type][f"{surface.name}_support"] = 1.0
+    if robot_world_tolerance is not None:
+        constraint_to_tol[Collision.type]["robot_to_world"] = robot_world_tolerance
     cost_reducer = CostReducer(constraint_to_mult)
     constraint_checker = ConstraintChecker(constraint_to_tol)
 

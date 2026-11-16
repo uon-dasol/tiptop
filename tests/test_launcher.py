@@ -19,28 +19,58 @@ ROOT = Path(__file__).resolve().parents[1]
 TASK = "car_leather_conditioner_bottle 집고 제자리에 놓아"
 COMMON = [
     "--task", TASK, "--max-approach-tilt-deg", "20", "--cad-mask-min-iou", "0.6", "--min-table-clearance-m", "0.01",
-    "--max-wrist-travel-deg", "90", "--min-engagement-depth-m", "0.02", "--table-support", "declared",
+    "--max-wrist-travel-deg", "90", "--min-engagement-depth-m", "0.02", "--num-particles", "32",
+    "--robot-world-tolerance-m", "0.005",
+    "--approach-distance-m", "0.15", "--lift-distance-m", "0.05", "--lift-hold-s", "1",
+    "--approach-speed-factor", "0.9", "--descend-far-speed-factor", "0.7", "--descend-near-speed-factor", "0.7",
+    "--lift-speed-factor", "0.7", "--home-speed-factor", "0.9", "--motion-timeout-s", "1",
+    "--table-support", "declared",
 ]
+
+
+FIXED_PRESETS = dict(
+    common=dict(
+        task=TASK, camera_url="http://127.0.0.1:13348", hardware_profile="tiptop/config/m1013_fixed_hardware.declared.json",
+        gateway_url="http://127.0.0.1:8090", max_approach_tilt_deg=20, cad_mask_min_iou=0.6, min_table_clearance_m=0.01,
+        max_wrist_travel_deg=90, min_engagement_depth_m=0.02, num_particles=32, robot_world_tolerance_m=0.005, approach_distance_m=0.15, lift_distance_m=0.05,
+        lift_hold_s=1, approach_speed_factor=0.9, descend_far_speed_factor=0.7, descend_near_speed_factor=0.7,
+        lift_speed_factor=0.7, home_speed_factor=0.9, motion_timeout_s=1, table_support="declared", viewer=True,
+    ),
+    sam3_reference=dict(
+        worker_socket="/tmp/tiptop-{uid}/known-task.sock", reference_scene="Lab/Uon_1F_Lab/table",
+        sam3_confidence_threshold=0.5, appearance_ranking=False, appearance_weight=1.0,
+    ),
+    gemini_er={},
+    services=[],
+)
 
 
 def arguments(mode, kind):
     return build_command(mode, load_presets()["presets"][mode], kind)[3:]
 
 
-def test_gemini_execute_matches_the_hand_written_command():
-    assert arguments("gemini_er", "execute") == [
+def fixed_arguments(mode, kind, tmp_path):
+    """Command from fixed presets, so the saved UI defaults can change without breaking the layout checks."""
+    path = tmp_path / "presets.json"
+    path.write_text(json.dumps(FIXED_PRESETS))
+    return build_command(mode, load_presets(path)["presets"][mode], kind)[3:]
+
+
+def test_gemini_execute_matches_the_hand_written_command(tmp_path):
+    assert fixed_arguments("gemini_er", "execute", tmp_path) == [
         "--camera-url", "http://127.0.0.1:13348", "--hardware-profile", "tiptop/config/m1013_fixed_hardware.declared.json",
         "--gateway-url", "http://127.0.0.1:8090", "--perception-mode", "gemini_er", "--allow-gemini-once",
         *COMMON, "--execute", "--viewer",
     ]
 
 
-def test_sam3_execute_matches_the_hand_written_command():
-    assert arguments("sam3_reference", "execute") == [
+def test_sam3_execute_matches_the_hand_written_command(tmp_path):
+    assert fixed_arguments("sam3_reference", "execute", tmp_path) == [
         "--worker-socket", f"/tmp/tiptop-{os.getuid()}/known-task.sock", "--camera-url", "http://127.0.0.1:13348",
         "--hardware-profile", "tiptop/config/m1013_fixed_hardware.declared.json",
         "--gateway-url", "http://127.0.0.1:8090", "--perception-mode", "sam3_reference",
-        "--reference-scene", "Lab/Uon_1F_Lab/table", *COMMON, "--execute", "--viewer",
+        "--reference-scene", "Lab/Uon_1F_Lab/table", *COMMON[:-2], "--sam3-confidence-threshold", "0.5", "--appearance-weight", "1", *COMMON[-2:],
+        "--execute", "--viewer",
     ]
 
 
@@ -49,6 +79,19 @@ def test_options_of_the_other_mode_and_gateway_are_left_out_of_planning_runs():
     assert "--gateway-url" not in gemini + sam3 and "--execute" not in gemini + sam3
     assert "--allow-gemini-once" in gemini and "--worker-socket" not in gemini and "--reference-scene" not in gemini
     assert "--allow-gemini-once" not in sam3 and "--worker-socket" in sam3 and "--reference-scene" in sam3
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_surrounding_obstacle_switch_defaults_on_and_round_trips_to_runner(mode):
+    from tiptop.scripts.run_known_pick_place import parse_args
+
+    values = load_presets()["presets"][mode]
+    assert values["surrounding_obstacles"] is True
+    for enabled in (False, True):
+        command = build_command(mode, dict(values, surrounding_obstacles=enabled), "plan")
+        assert ("--no-surrounding-obstacles" in command) is not enabled
+        assert parse_args(command[3:]).surrounding_obstacles is enabled
+    assert parse_args(["--surrounding-obstacles"]).surrounding_obstacles is True
 
 
 def test_connection_check_uses_the_gateway_without_inference_options():
@@ -65,6 +108,18 @@ def test_every_generated_command_is_accepted_by_the_runner_parser(mode, kind):
 
     args = parse_args(arguments(mode, kind))
     assert args.perception_mode == mode and args.execute == (kind == "execute") and args.check == (kind == "check")
+
+
+def test_preset_planning_values_form_valid_planner_settings():
+    from dataclasses import fields
+
+    from tiptop.doosan.known_task import KnownTaskPlanningSettings
+
+    keys = {field["key"] for field in FIELDS}
+    chosen = [field for field in fields(KnownTaskPlanningSettings) if field.name in keys]
+    for mode in MODES:
+        values = load_presets()["presets"][mode]
+        KnownTaskPlanningSettings(**{field.name: field.type(float(values[field.name])) for field in chosen})
 
 
 def test_invalid_input_is_rejected_with_the_field_name():
@@ -183,7 +238,7 @@ def test_object_list_follows_the_catalog_order(viewer):
     catalog = json.loads((ROOT / "tiptop/config/known_objects.json").read_text())["objects"]
     objects = json.loads(data)["objects"]
     assert status == 200 and [item["class_id"] for item in objects] == [item["class_id"] for item in catalog]
-    assert objects[0]["class_id"] == "black_pepper_shaker" and len(objects) == 28
+    assert objects[0]["class_id"] == "black_pepper_shaker" and len(objects) == 36
     assert objects[0]["name_ko"] == "후추통" and all(item["name_ko"] for item in objects)
 
 
@@ -214,3 +269,33 @@ def test_run_api_starts_one_run_at_a_time_and_stops_it(viewer):
     assert json.loads(request(server, "GET", "/api/status", token=token)[1])["running"] is True
     assert json.loads(request(server, "POST", "/api/stop", body={}, token=token)[1])["stopped"] is True
     assert request(server, "POST", "/api/run", body={}, token=token)[0] == 400
+
+
+def test_appearance_ranking_flag_is_sent_only_when_enabled_and_only_in_sam3_mode(tmp_path):
+    path = tmp_path / "presets.json"
+    document = json.loads(json.dumps(FIXED_PRESETS))
+    document["sam3_reference"]["appearance_ranking"] = True
+    path.write_text(json.dumps(document))
+    sam3 = build_command("sam3_reference", load_presets(path)["presets"]["sam3_reference"], "execute")
+    assert "--appearance-ranking" in sam3 and sam3[sam3.index("--appearance-weight") + 1] == "1"
+    assert "--appearance-ranking" not in fixed_arguments("sam3_reference", "execute", tmp_path)
+    gemini = build_command("gemini_er", load_presets(path)["presets"]["gemini_er"], "execute")
+    assert "--appearance-ranking" not in gemini and "--appearance-weight" not in gemini
+
+
+def test_num_particles_is_a_launcher_field_with_a_preset_and_must_be_an_integer(tmp_path):
+    assert any(field["key"] == "num_particles" for field in FIELDS)
+    values = dict(load_presets()["presets"]["gemini_er"])
+    assert values["num_particles"] == 32
+    assert build_command("gemini_er", {**values, "num_particles": 48}, "plan")[3:].count("--num-particles") == 1
+    assert "48" in build_command("gemini_er", {**values, "num_particles": "48"}, "plan")
+    with pytest.raises(ValueError, match="integer"):
+        build_command("gemini_er", {**values, "num_particles": 32.5}, "plan")
+
+
+def test_robot_world_tolerance_is_a_launcher_field_with_the_agreed_default():
+    assert any(field["key"] == "robot_world_tolerance_m" for field in FIELDS)
+    values = dict(load_presets()["presets"]["gemini_er"])
+    assert float(values["robot_world_tolerance_m"]) == 0.005
+    command = build_command("gemini_er", {**values, "robot_world_tolerance_m": 0.01}, "plan")
+    assert command[command.index("--robot-world-tolerance-m") + 1] == "0.01"

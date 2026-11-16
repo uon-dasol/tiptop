@@ -152,6 +152,29 @@ async def predict_depth_and_grasps(
     return result
 
 
+def object_points(detection, depth):
+    """World points and colours of each detected mask on the valid depth pixels."""
+    objects = {}
+    for bbox, mask in zip(detection["bboxes"], detection["masks"][:, 0]):
+        selected = mask & depth["valid_depth_mask"]
+        objects[bbox["label"]] = dict(
+            world_xyz=depth["xyz_map"][selected],
+            rgb=depth["rgb_map"][selected],
+            valid_pixels=int(selected.sum()),
+            mask_pixels=int(mask.sum()),
+        )
+    return objects
+
+
+def select_reference_candidate(results, candidate):
+    """Select another grasp target while retaining every instance's collision mask."""
+    label = candidate["bboxes"][0]["label"]
+    switched = dict(results, grounded_atoms=[dict(predicate="on", args=[label, "table"])])
+    switched["objects"] = object_points(switched, results)
+    switched["reference_diagnostics"] = dict(results["reference_diagnostics"], selected_index=candidate["index"])
+    return switched
+
+
 async def run_visual_perception(
     session,
     frame,
@@ -166,6 +189,8 @@ async def run_visual_perception(
     perception_mode=None,
     sam3_url=None,
     reference_scene=None,
+    sam3_confidence_threshold=None,
+    appearance_weight=None,
     on_update=None,
 ) -> dict:
     """One RGB/depth observation through the selected detector and common geometry.
@@ -180,7 +205,7 @@ async def run_visual_perception(
     if mode == "sam3_reference":
         if client is not None or active_task is not None:
             raise ValueError("Reference mode cannot use a Gemini client or an active-task ROI")
-        from tiptop.perception.sam3_reference import detect_reference
+        from tiptop.perception.sam3_reference import DEFAULT_CONFIDENCE_THRESHOLD, detect_reference
 
         detection_job = detect_reference(
             session,
@@ -188,6 +213,9 @@ async def run_visual_perception(
             task_instruction,
             server_url=sam3_url or cfg.perception.sam3.url,
             reference_scene=reference_scene or cfg.perception.sam3.reference_scene,
+            confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD
+            if sam3_confidence_threshold is None else sam3_confidence_threshold,
+            appearance_weight=appearance_weight,
         )
     elif active_task is not None:
         if client is not None or active_task["instruction"] != task_instruction:
@@ -207,18 +235,9 @@ async def run_visual_perception(
         ), "depth"),
         completed(detection_job, "detection"),
     )
-    objects = {}
-    for bbox, mask in zip(detection["bboxes"], detection["masks"][:, 0]):
-        selected = mask & depth["valid_depth_mask"]
-        objects[bbox["label"]] = dict(
-            world_xyz=depth["xyz_map"][selected],
-            rgb=depth["rgb_map"][selected],
-            valid_pixels=int(selected.sum()),
-            mask_pixels=int(mask.sum()),
-        )
     return {
         **depth,
         **detection,
-        "objects": objects,
+        "objects": object_points(detection, depth),
         "semantic_source": detection.get("semantic_source", "active_task_roi" if active_task is not None else "gemini"),
     }

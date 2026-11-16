@@ -44,6 +44,19 @@ fi
 
 # Install
 cd "$INSTALL_DIR"
+
+# Let the known-object adapter give each particle one supplied grasp in order instead of sampling randomly.
+ordered_patch="../patches/cutamp-ordered-grasps.patch"
+if git apply --reverse --check "$ordered_patch" 2>/dev/null; then
+    echo "✓ ordered-grasp patch already applied"
+elif git apply --check "$ordered_patch"; then
+    git apply "$ordered_patch"
+    echo "✓ ordered-grasp patch applied"
+else
+    echo "ERROR: cuTAMP changed; review patches/cutamp-ordered-grasps.patch before installing"
+    exit 1
+fi
+
 echo "Installing cuTAMP..."
 pip install -e . --no-build-isolation --no-deps
 cd ..

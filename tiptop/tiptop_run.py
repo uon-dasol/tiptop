@@ -279,7 +279,8 @@ def _get_task_instruction() -> str:
 
 
 def create_tamp_environment(
-    object_meshes: dict[str, Mesh], table_cuboid: Cuboid, grounded_atoms: list[dict], include_workspace: bool
+    object_meshes: dict[str, Mesh], table_cuboid: Cuboid, grounded_atoms: list[dict], include_workspace: bool,
+    *, movable_labels: set[str] | None = None, collision_labels: set[str] | None = None,
 ) -> tuple[TAMPEnvironment, list[Cuboid | Mesh]]:
     # Reject goals that reference objects not present in the perceived scene.
     # Without this, cuTAMP's BFS runs without stopping, expanding the move-chain on an unreachable goal.
@@ -291,6 +292,8 @@ def create_tamp_environment(
                     f"Goal predicate {atom['predicate']}({', '.join(atom['args'])}) "
                     f"references unknown object '{arg}'. Known objects: {sorted(known_labels)}"
                 )
+            if collision_labels is not None and arg != table_cuboid.name and arg not in collision_labels:
+                raise ValueError(f"Goal object '{arg}' must remain in the collision scene")
 
     # Identify which objects are used as surfaces (second arg in on(x, y))
     surface_labels = set()
@@ -301,11 +304,16 @@ def create_tamp_environment(
     # Separate movables and surfaces
     movables = []
     surfaces = []
+    obstacles = []
     for label, mesh in object_meshes.items():
+        if collision_labels is not None and label not in collision_labels:
+            continue
         if label in surface_labels:
             surfaces.append(mesh)
-        else:
+        elif movable_labels is None or label in movable_labels:
             movables.append(mesh)
+        else:
+            obstacles.append(mesh)
     _log.info(f"Movables: {[m.name for m in movables]}")
     _log.info(f"Surfaces: {[s.name for s in surfaces]}")
 
@@ -337,6 +345,7 @@ def create_tamp_environment(
     # All surfaces include table and detected surface objects
     all_surfaces = [table_cuboid, *surfaces]
     statics = list(workspace_cuboids()) if include_workspace else []
+    statics.extend(obstacles)
     for surface in all_surfaces:
         statics.append(surface)
 
@@ -628,12 +637,15 @@ async def run_perception(
     perception_mode=None,
     sam3_url=None,
     reference_scene=None,
+    sam3_confidence_threshold=None,
+    appearance_weight=None,
     pick_place_bounds_xy=None,
     cad_mask_min_iou=0.75,
     preview=None,
     background_tasks: list | None = None,
     table_support: str = "ransac-cad",
     declared_table: Cuboid | None = None,
+    surrounding_obstacles: bool = True,
 ) -> tuple[TAMPEnvironment, list, ProcessedScene, list[dict]]:
     """Run perception. With `background_tasks`, saving outputs is appended there instead of awaited."""
     if background_tasks is not None and log_to_rerun:
@@ -668,23 +680,49 @@ async def run_perception(
         perception_mode=perception_mode,
         sam3_url=sam3_url,
         reference_scene=reference_scene,
+        sam3_confidence_threshold=sam3_confidence_threshold,
+        appearance_weight=appearance_weight,
         on_update=None if preview is None else preview.update,
     )
     save_dir.mkdir(parents=True, exist_ok=True)
-    (save_dir / "semantic-task.json").write_text(
-        json.dumps(
-            dict(
-                instruction=task_instruction,
-                bboxes=results["bboxes"],
-                grounded_atoms=results["grounded_atoms"],
-                semantic_source=results["semantic_source"],
-                reference_diagnostics=results.get("reference_diagnostics"),
-            ),
-            ensure_ascii=False,
-            indent=2,
+
+    def write_semantic_task(current, trials=None):
+        diagnostics = current.get("reference_diagnostics")
+        if trials and diagnostics is not None:
+            diagnostics = dict(diagnostics, candidate_trials=trials)
+        (save_dir / "semantic-task.json").write_text(
+            json.dumps(
+                dict(
+                    instruction=task_instruction,
+                    bboxes=current["bboxes"],
+                    grounded_atoms=current["grounded_atoms"],
+                    semantic_source=current["semantic_source"],
+                    reference_diagnostics=diagnostics,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n"
         )
-        + "\n"
-    )
+
+    write_semantic_task(results)
+
+    def save_candidate_images(current, trials):
+        diagnostics = current.get("reference_diagnostics")
+        if diagnostics is None or not trials or trials[0]["candidate_index"] is None:
+            return
+        from tiptop.console import log_tag
+        from tiptop.perception.sam3_reference import save_candidate_crops, save_reference_image
+
+        try:
+            save_candidate_crops(rgb, diagnostics, trials, save_dir / "candidates")
+            log_tag("Perception", f"후보별 크롭 저장: {save_dir / 'candidates'}", "dim")
+        except Exception as error:
+            _log.warning("Candidate crops skipped: %s", error)
+        try:
+            save_reference_image(diagnostics, save_dir / "candidates")
+        except Exception as error:
+            _log.warning("Reference image copy skipped: %s", error)
     registered_grasps = None
     if provider == "m2t2":
         results["grasps"] = await generate_grasps_async(
@@ -695,23 +733,37 @@ async def run_perception(
             apply_bounds=cfg.perception.m2t2.apply_bounds,
         )
     elif provider == "known_db":
-        from tiptop.perception.known_objects import estimate_registered_grasps, registered_target
+        from tiptop.perception.known_objects import SilhouetteMismatchError, estimate_first_matching_candidate
+        from tiptop.perception_wrapper import select_reference_candidate
 
-        label, entry = registered_target(results["bboxes"], results["grounded_atoms"])
-        registered_grasps = {
-            label: await estimate_registered_grasps(
+        def select_visible_candidate(current, candidate):
+            selected = select_reference_candidate(current, candidate)
+            if preview is not None:
+                preview.update("target", dict(label=candidate["bboxes"][0]["label"]))
+            return selected
+
+        try:
+            results, label, entry, registered, trials = await estimate_first_matching_candidate(
                 session,
                 frame,
                 results,
                 observation.world_from_cam,
-                entry=entry,
-                label=label,
+                switch_candidate=select_visible_candidate,
                 server_url=cfg.perception.get("foundation_pose_url", "http://127.0.0.1:13346"),
                 world_from_planner_object=np.eye(4),
                 grasp_from_tcp=np.eye(4) if registered_grasp_from_tcp is None else registered_grasp_from_tcp,
                 cad_mask_min_iou=cad_mask_min_iou,
             )
-        }
+        except SilhouetteMismatchError as error:
+            write_semantic_task(results, error.trials)
+            save_candidate_images(results, error.trials)
+            raise
+        registered_grasps = {label: registered}
+        if trials[0]["candidate_index"] is not None:
+            write_semantic_task(results, trials)
+            save_candidate_images(results, trials)
+            if preview is not None and trials[-1]["rank"] > 1:
+                await asyncio.to_thread(preview.update, "detection", results)
         results["grasps"] = {}
         (save_dir / "registered-pose.json").write_text(
             json.dumps(
@@ -820,12 +872,25 @@ async def run_perception(
         rr.log("bboxes", rr.Image(bbox_viz))
         rr.log("masks", rr.Image(masks_viz))
 
+    collision_labels = None
+    if not surrounding_obstacles:
+        if not registered_grasps or len(registered_grasps) != 1:
+            raise ValueError("Target-only collision registration requires one registered grasp target")
+        collision_labels = set(registered_grasps)
+    results["surrounding_obstacles"] = surrounding_obstacles
     env, all_surfaces = create_tamp_environment(
         processed_scene.object_meshes,
         processed_scene.table_cuboid,
         results["grounded_atoms"],
         include_workspace,
+        movable_labels=set(registered_grasps)
+        if registered_grasps is not None and results["semantic_source"] == "sam3_reference" else None,
+        collision_labels=collision_labels,
     )
+    if preview is not None:
+        await asyncio.to_thread(preview.obstacles, processed_scene, results,
+                                world_from_cam=observation.world_from_cam, intrinsics=frame.intrinsics,
+                                collision_labels=collision_labels)
     _log.info(f"Processing scene and perception results took {time.perf_counter() - proc_st:.2f}s")
     _log.info(f"Perception pipeline completed, took {time.perf_counter() - start_time:.2f}s")
     return env, all_surfaces, processed_scene, results["grounded_atoms"]

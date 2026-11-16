@@ -11,6 +11,7 @@ import socket
 import time
 
 from tiptop.console import task_result_text, timing_line
+from tiptop.task_logging import LOG_OWNER_ENV
 
 
 def default_socket():
@@ -42,7 +43,8 @@ def forward_if_requested(argv):
     # No fallback/retry after submission: a dropped connection must not repeat motion.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.connect(os.path.expanduser(path))
-        client.sendall((json.dumps(dict(argv=forwarded, cwd=os.getcwd()))+'\n').encode())
+        client.sendall((json.dumps(dict(argv=forwarded, cwd=os.getcwd(),
+                                       terminal_log_external=os.environ.get(LOG_OWNER_ENV) == "launcher"))+'\n').encode())
         with client.makefile('rb') as stream:
             for line in stream:
                 event = json.loads(line)
@@ -108,6 +110,7 @@ class TaskWorker:
                     raise ValueError('Worker currently requires --perception-mode sam3_reference')
                 args._cli_started_at = request_started
                 args._worker_request = True
+                args._terminal_log_external = request.get("terminal_log_external") is True
                 streams = [(h, h.stream) for h in logging.getLogger().handlers
                            if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)]
                 for h, _ in streams:

@@ -128,6 +128,43 @@ def project_grasp_boxes(boxes, world_from_db, world_from_cam, intrinsics):
     return output
 
 
+def rgb_camera_view(world_from_cam, intrinsics, width, height):
+    """Use the RGB optical calibration for perspective rendering of world geometry."""
+    return dict(camera_from_world=np.linalg.inv(np.asarray(world_from_cam, float)).tolist(),
+                intrinsics=np.asarray(intrinsics, float).tolist(), width=int(width), height=int(height))
+
+
+def build_obstacle_scene(object_meshes, objects, bboxes, support_z, target_label, *, point_limit=1200,
+                         collision_labels=None):
+    """Display masked observations and the actual planning meshes in world metres."""
+    from scipy.spatial.transform import Rotation
+
+    instances = []
+    for index, box in enumerate(bboxes):
+        label = box["label"]
+        if collision_labels is not None and label not in collision_labels:
+            continue
+        points = np.asarray(objects.get(label, {}).get("world_xyz", []), float).reshape(-1, 3)
+        points = points[np.isfinite(points).all(axis=1)]
+        count = len(points)
+        if count > point_limit:
+            points = points[np.linspace(0, count-1, point_limit, dtype=int)]
+        vertices, faces = np.empty((0, 3)), np.empty((0, 3), dtype=int)
+        mesh = object_meshes.get(label)
+        if mesh is not None:
+            geometry = mesh.get_trimesh_mesh(process=False)
+            pose = np.asarray(mesh.pose, float)
+            rotation = Rotation.from_quat(pose[[4, 5, 6, 3]]).as_matrix()
+            vertices = np.asarray(geometry.vertices) @ rotation.T + pose[:3]
+            faces = np.asarray(geometry.faces, int)
+        instances.append(dict(label=label, class_id=box.get("class_id", label),
+                              points=np.round(points, 5).tolist(), observed_points=count,
+                              vertices=np.round(vertices, 5).tolist(), faces=faces.tolist(),
+                              color=list(_COLORS[index % len(_COLORS)]), collision_mesh=mesh is not None))
+    return dict(objects=instances, support_z_m=float(support_z), target_label=target_label,
+                frame="world", units="m", source="planning_meshes")
+
+
 class TaskPreview:
     """Publish one observation's immutable image layers and atomic metadata."""
 
@@ -171,7 +208,14 @@ class TaskPreview:
                     self._image("mask", rgba)
                     self.state["boxes"] = data["bboxes"]
                     self.state["detector"] = data.get("semantic_source", "gemini_sam2")
+                    self.state["target_label"] = next(
+                        (atom["args"][0] for atom in data.get("grounded_atoms", []) if atom.get("args")), None
+                    )
                     self.state["status"] = "물체 인식 완료 · 최종 경로 계획 대기"
+                elif event == "target":
+                    self.state["target_label"] = data["label"]
+                elif event == "obstacles":
+                    self.state["obstacle_scene"] = data
                 elif event == "final_grasp":
                     self.state["final_grasp"] = data
                     self.state["status"] = "전체 경로 계획 완료 · 실행 계획의 최종 파지 표시"
@@ -209,6 +253,27 @@ class TaskPreview:
         if "depth" not in self.state["ready"]:
             self.state["ready"].append("depth")
 
+    def obstacles(self, scene, visual, *, world_from_cam=None, intrinsics=None, collision_labels=None):
+        """Export display samples without rebuilding or modifying collision geometry."""
+        try:
+            from tiptop.perception.placement import table_support_z
+
+            table = scene.table_cuboid
+            support_z = table_support_z(table.pose[2] + table.dims[2] / 2)
+            target = next(iter(scene.grasps), self.state.get("target_label"))
+            data = build_obstacle_scene(scene.object_meshes, visual["objects"], visual["bboxes"], support_z, target,
+                                        collision_labels=collision_labels)
+            data["surrounding_obstacles"] = visual.get("surrounding_obstacles", True)
+            if world_from_cam is not None and intrinsics is not None:
+                data["camera"] = rgb_camera_view(world_from_cam, intrinsics, self.state["width"], self.state["height"])
+            path = self.directory / "obstacles.json"
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(data, ensure_ascii=False, allow_nan=False))
+            temporary.replace(path)
+            self.update("obstacles", data)
+        except Exception as error:
+            _log.warning("Perception viewer obstacle scene skipped: %s", error)
+
     def grasps(self, data, world_from_cam, intrinsics, *, max_tilt_deg=10, spheres=None):
         """Retain DB candidates for optional inspection; they are never the final grasp."""
         try:
@@ -237,6 +302,7 @@ class TaskPreview:
             path = self.directory.parent / "registered-pose.json"
             if not path.is_file():
                 return None
+            from tiptop.doosan.grasp_database import database_grasp_matrices
             from tiptop.object_catalog import registered_object
 
             registered = json.loads(path.read_text())
@@ -248,7 +314,9 @@ class TaskPreview:
             self.state["db_source"] = dict(path=str(entry["db"]), class_id=entry["class_id"],
                                            coordinate_frame="object_zero_pose", units="m",
                                            count=len(document["data"]))
-            self._database_context = (document["data"], np.asarray(registered["pose"]["world_from_cad"]))
+            matrices = database_grasp_matrices(document)
+            rows = [dict(row, grasp_mat=matrix.tolist()) for row, matrix in zip(document["data"], matrices)]
+            self._database_context = (rows, np.asarray(registered["pose"]["world_from_cad"]))
         return self._database_context
 
     def _attach_db_boxes(self, grasp, index, world_from_cam, intrinsics):
@@ -258,8 +326,10 @@ class TaskPreview:
                 return
             rows, world_from_db = context
             row = rows[index]
-            grasp["db_reference"] = dict(index=int(index), scene_id=row["scene_id"],
-                                          source_pregrasp_index=row["source_pregrasp_index"])
+            grasp["db_reference"] = dict(index=int(index), scene_id=row["scene_id"])
+            for key in ("source_pregrasp_index", "source_output_index"):
+                if key in row:
+                    grasp["db_reference"][key] = row[key]
             if row.get("grasp_boxes") is not None:
                 # Keep the recorded object-fixed geometry for reference. The visible sweep template is
                 # the DB grasp frame placed at the displayed TCP (DB-to-TCP correction undone), so it
@@ -421,12 +491,22 @@ def preview_saved_task(output):
     depth_path = output / "perception/depth.png"
     depth = np.asarray(Image.open(depth_path)).astype(float)/1000 if depth_path.is_file() else observation.get("depth")
     preview.update("observation", dict(rgb=observation["rgb"], depth=depth))
+    obstacle_path = preview.directory / "obstacles.json"
+    if obstacle_path.is_file():
+        try:
+            obstacle_scene = json.loads(obstacle_path.read_text())
+            obstacle_scene["camera"] = rgb_camera_view(observation["world_from_cam"], observation["intrinsics"],
+                                                        preview.state["width"], preview.state["height"])
+            preview.update("obstacles", obstacle_scene)
+        except (OSError, ValueError) as error:
+            _log.warning("Saved obstacle scene unavailable: %s", error)
     semantic_path = output / "semantic-task.json"
     if semantic_path.is_file() and (output / "perception/masks.npz").is_file():
         semantic = json.loads(semantic_path.read_text())
         with np.load(output / "perception/masks.npz", allow_pickle=False) as masks:
             preview.update("detection", dict(masks=masks["arr_0"], bboxes=semantic["bboxes"],
-                                              semantic_source=semantic["semantic_source"]))
+                                              semantic_source=semantic["semantic_source"],
+                                              grounded_atoms=semantic.get("grounded_atoms", [])))
     plan_path = output / "plan.json"
     plan = json.loads(plan_path.read_text()) if plan_path.is_file() else None
     pose_path = output / "registered-pose.json"
@@ -446,11 +526,13 @@ def preview_saved_task(output):
             _log.warning("Saved side scene unavailable: %s", error)
     if pose_path.is_file():
         try:
+            from tiptop.doosan.grasp_database import database_grasp_matrices
             from tiptop.object_catalog import registered_object
 
             pose = json.loads(pose_path.read_text())
             entry = registered_object(pose["class_id"])
-            rows = json.loads(entry["db"].read_text())["data"]
+            document = json.loads(entry["db"].read_text())
+            rows = document["data"]
             order = np.argsort(-np.asarray([row["score"] for row in rows]), kind="stable")
             grasp_from_tcp = (plan or {}).get("db_grasp_from_tcp")
             profile = (plan or {}).get("hardware_profile")
@@ -460,7 +542,7 @@ def preview_saved_task(output):
                 preparation = json.loads(str(observation.get("camera_preparation", "{}")))
                 grasp_from_tcp = preparation.get("db_grasp_from_tcp", np.eye(4))
             grasp_from_tcp = np.asarray(grasp_from_tcp, float)
-            world_tcp = np.asarray(pose["pose"]["world_from_cad"]) @ np.asarray([rows[i]["grasp_mat"] for i in order]) @ grasp_from_tcp
+            world_tcp = np.asarray(pose["pose"]["world_from_cad"]) @ database_grasp_matrices(document)[order] @ grasp_from_tcp
             preview.grasps(dict(world_from_tcp=world_tcp, candidate_indices=order, scores=[rows[i]["score"] for i in order]),
                            observation["world_from_cam"], observation["intrinsics"],
                            max_tilt_deg=(plan or {}).get("max_approach_tilt_deg", 10))

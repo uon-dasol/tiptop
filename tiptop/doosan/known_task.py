@@ -6,14 +6,19 @@ state, recorded trajectory, or external source modification is used here.
 
 import copy
 import json
+import math
 import time
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
+from tiptop.console import log_tag
 from tiptop.doosan.planning_runtime import serialized_planning
+
+IK_CANDIDATE_FACTOR = 1.5  # CAD-clear candidates IK-solved per particle; IK failures are dropped
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,8 @@ class KnownTaskPlanningSettings:
     max_wrist_travel_deg: float = 90.0
     min_table_clearance_m: float = 0.010
     min_engagement_depth_m: float = 0.020
+    num_particles: int = 32  # most IK-feasible grasps handed to cuTAMP; each gets one particle
+    robot_world_tolerance_m: float = 0.005  # summed overlap depth of robot spheres into obstacles that cuTAMP accepts
 
     def __post_init__(self):
         for name, value in asdict(self).items():
@@ -44,10 +51,19 @@ class KnownTaskPlanningSettings:
             raise ValueError("Planning time, lift and tolerances must be finite and positive")
         if not np.isfinite(self.min_engagement_depth_m) or self.min_engagement_depth_m < 0:
             raise ValueError("Minimum engagement depth must be finite and not negative")
+        if not isinstance(self.num_particles, int) or self.num_particles < 1:
+            raise ValueError("num_particles must be a positive integer")
         if self.lift_distance_m <= self.motion_position_tolerance_m + .002:
             raise ValueError("Lift distance must exceed the motion position tolerance plus 2 mm")
         if self.approach_distance_m < self.lift_distance_m:
             raise ValueError("Approach distance must not be shorter than the lift distance")
+
+
+def log_candidate_stage(tag, label, before, after, seconds=None, note="", *, enough):
+    """One funnel line: candidates kept and dropped by a stage, red when none remain, yellow when fewer than `enough`."""
+    kind = "fail" if after == 0 else "warn" if after < enough else "ok"
+    timing = "" if seconds is None else f" · {seconds:.2f}s"
+    log_tag(tag, f"{label}  {before:,} → {after:,} (−{before - after:,}){note}{timing}", kind)
 
 
 def approach_tilt_mask(world_from_tcp, max_tilt_deg=3.0):
@@ -95,13 +111,13 @@ def plan_known_task(
     import cutamp.tamp_world as tamp_world
     import torch
     from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
-    from curobo.geom.types import WorldConfig
     from curobo.types.base import TensorDeviceType
     from curobo.types.math import Pose
     from curobo.types.robot import RobotConfig
     from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
     from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig
     from cutamp.config import TAMPConfiguration
+    from cutamp.motion_solver import MotionPlanningError
     from cutamp.robots import RobotContainer
     from cutamp.utils.common import get_world_cfg
     from cutamp.utils.shapes import sample_greedy_surface_spheres
@@ -145,9 +161,8 @@ def plan_known_task(
     table_clearance = (centers[:, :, 2] - tool[None, :, 3] - support_z).min(1)
     # Reject candidates whose open gripper spheres come closer than the configured clearance to the
     # support plane, which lies 20 mm above the estimated tabletop.
-    valid = np.flatnonzero(
-        approach_tilt_mask(tcp, max_approach_tilt_deg) & (table_clearance >= settings.min_table_clearance_m)
-    )
+    tilt_ok = approach_tilt_mask(tcp, max_approach_tilt_deg)
+    valid = np.flatnonzero(tilt_ok & (table_clearance >= settings.min_table_clearance_m))
     table_filter_seconds = time.perf_counter() - filter_started
     cad_started = time.perf_counter()
     mesh = load_cad_mesh(entry["cad"], entry["cad_scale_to_m"])
@@ -156,12 +171,22 @@ def plan_known_task(
     engagement_depth = engagement_depth_m(tcp, pose, mesh.vertices)
     deep_enough = valid[engagement_depth[valid] >= settings.min_engagement_depth_m]
     cad_started = time.perf_counter()
-    # IK only consumes the first 48 clear candidates. Stop as soon as that
-    # same ordered prefix is known; later candidates cannot change its input.
-    cad_candidate_limit = 48
+    # cuTAMP receives at most `num_particles` IK-feasible grasps, so IK only needs a margin of clear
+    # candidates over that count.
+    cad_candidate_limit = math.ceil(IK_CANDIDATE_FACTOR * settings.num_particles)
     cad_screening = screen_cad_grasps(tcp, pose, tool, deep_enough, hull, limit=cad_candidate_limit)
     screened = cad_screening.indices
     cad_check_seconds = time.perf_counter() - cad_started
+    enough = settings.num_particles
+    log_tag("Grasp", f"DB 파지 {len(tcp):,}개를 단계별로 거릅니다 · 탈락 수와 남은 수 · 노랑: 입자 수 {enough}개보다 적음", "info")
+    log_candidate_stage("Grasp", f"① 접근각 ≤{max_approach_tilt_deg:g}°", len(tcp), int(tilt_ok.sum()), enough=enough)
+    log_candidate_stage("Grasp", f"② 테이블 여유 ≥{settings.min_table_clearance_m * 1000:g}mm", int(tilt_ok.sum()), len(valid),
+                        table_filter_seconds, enough=enough)
+    log_candidate_stage("Grasp", f"③ 파지 깊이 ≥{settings.min_engagement_depth_m * 1000:g}mm", len(valid), len(deep_enough),
+                        enough=enough)
+    stopped = "" if cad_screening.complete else f", 통과 {cad_candidate_limit}개에서 중단"
+    log_candidate_stage("Grasp", "④ CAD 충돌 없음", len(deep_enough), len(screened), cad_check_seconds,
+                        f" · {cad_screening.checked}/{cad_screening.available}개 검사{stopped}", enough=enough)
     if not screened:
         raise ValueError(
             f"No DB grasp within {max_approach_tilt_deg:g} degrees clears observed table, "
@@ -215,7 +240,8 @@ def plan_known_task(
             else ASSETS / "m1013_uon.urdf",
             output_dir=output / "model",
         )
-    static_world = WorldConfig(cuboid=[table, *fixed_obstacles])
+    # Include observed non-target hulls as well as the table and configured structures.
+    static_world = get_world_cfg(copy.deepcopy(env), include_movables=False)
     model_key = configuration_key(cfg, tool, fixed_base_world_contact)
     def build_ik():
         ik = IKSolver(
@@ -251,7 +277,9 @@ def plan_known_task(
     feasible = batch[solved.success.any(dim=1).cpu().numpy()]
     ik_seconds = time.perf_counter() - ik_started
     # Angle, geometry and IK screening preserve the DB's descending score order.
-    selected = feasible[:16]
+    selected = feasible[:settings.num_particles]
+    log_candidate_stage("IK", "⑤ 충돌 없는 IK 해", len(batch), len(feasible), ik_seconds, enough=enough)
+    log_candidate_stage("IK", f"⑥ cuTAMP에 전달 (상한 {enough})", len(feasible), len(selected), enough=enough)
     if not len(selected):
         raise ValueError("No camera-aware IK candidate in the screened batch")
     tensor = TensorDeviceType()
@@ -272,7 +300,8 @@ def plan_known_task(
     }
     config = TAMPConfiguration(
         robot="m1013_uon",
-        num_particles=16,
+        num_particles=len(selected),
+        ordered_grasps=True,
         num_opt_steps=100,
         max_loop_dur=30.0,
         m2t2_grasps=True,
@@ -319,14 +348,32 @@ def plan_known_task(
 
     original_rank = algorithm.get_ranked_satisfying_particles
     particle_order = []
+    motion_trials = dict(count=0, total=0)
     def rank_particles(plan_info, *args, **kwargs):
         particles = original_rank(plan_info, *args, **kwargs)
-        if not unique_goals_first:
-            return particles
-        grasp_keys = [op.values[1] for op in plan_info['plan_skeleton'] if op.operator.name == 'Pick']
-        particles, audit = unique_path_goals_first(particles, grasp_keys)
-        particle_order.append(audit)
+        distinct = ""
+        if unique_goals_first:
+            grasp_keys = [op.values[1] for op in plan_info['plan_skeleton'] if op.operator.name == 'Pick']
+            particles, audit = unique_path_goals_first(particles, grasp_keys)
+            particle_order.append(audit)
+            distinct = f" (서로 다른 파지 {audit['unique_goals']}개)"
+        motion_trials.update(count=0, total=len(particles["q0"]))
+        log_tag("cuTAMP", f"입자 {config.num_particles}개 중 제약을 만족한 입자 {motion_trials['total']}개{distinct} · "
+                          "이 순서로 모션 계획을 시도해 처음 성공하면 멈춥니다", "ok")
         return particles
+
+    in_place_solver = make_in_place_solver(settings)
+    def logged_solver(*args, **kwargs):
+        motion_trials["count"] += 1
+        label = f"{motion_trials['count']}/{motion_trials['total']}번째 입자"
+        started = time.perf_counter()
+        try:
+            result = in_place_solver(*args, **kwargs)
+        except MotionPlanningError as error:
+            log_tag("Motion", f"{label} 실패 · {error} · {time.perf_counter() - started:.2f}s", "warn")
+            raise
+        log_tag("Motion", f"{label} 성공 · {time.perf_counter() - started:.2f}s", "ok")
+        return result
 
     original_world_cost = tamp_world.get_world_collision_cost
     def world_cost(*args, **kwargs):
@@ -339,13 +386,13 @@ def plan_known_task(
         m1013_entrypoint(container, motion_timeout_s=settings.motion_timeout_s),
         patch.object(algorithm, "get_world_cfg", safe_world),
         patch.object(tamp_world, "get_world_cfg", safe_world),
-        patch.object(algorithm, "solve_curobo", make_in_place_solver(settings)),
+        patch.object(algorithm, "solve_curobo", logged_solver),
         patch.object(algorithm, "get_ranked_satisfying_particles", rank_particles),
         patch.object(tamp_world, "sample_greedy_surface_spheres", cached_sample),
         patch.object(tamp_world, "get_world_collision_cost", world_cost if fixed_base_world_contact else original_world_cost),
     ):
         plan, elapsed, failure, search = run_known_planning(
-            run_planning,
+            partial(run_planning, robot_world_tolerance=settings.robot_world_tolerance_m),
             env,
             config,
             observation.q_init,
@@ -387,7 +434,15 @@ def plan_known_task(
     return_check = validate_in_place_plan(serialized, tcp_at,
         lift_distance_m=settings.lift_distance_m, position_tolerance_m=settings.motion_position_tolerance_m)
     serialized["in_place_return_check"] = return_check
+    collision_registration = dict(
+        surrounding_obstacles=visual.get("surrounding_obstacles", True),
+        perceived_collision_labels=sorted(
+            set(scene.object_meshes) & {obj.name for obj in [*env.movables, *env.statics]}
+        ),
+    )
+    serialized.update(collision_registration)
     report = dict(
+        **collision_registration,
         in_place_return_check=return_check,
         planning_seconds=elapsed,
         planning_total_seconds=time.perf_counter() - started,

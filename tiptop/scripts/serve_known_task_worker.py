@@ -19,7 +19,9 @@ def main():
 
     console = logging.StreamHandler()
     console.setFormatter(runner._TimingFormatter('%(levelname)s:%(name)s:%(message)s'))
+    console.addFilter(runner._TiptopProgressFilter())
     logging.basicConfig(level=logging.INFO, handlers=[console])
+    runner.quiet_noisy_loggers()
     config_path = get_tiptop_cfg_path()
 
     def prepare():

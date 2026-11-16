@@ -1,27 +1,79 @@
 {
   "common": {
-    "task": "car_leather_conditioner_bottle 집고 제자리에 놓아",
+    "task": "후추통 집고 제자리에 놓아",
     "camera_url": "http://127.0.0.1:13348",
     "hardware_profile": "tiptop/config/m1013_fixed_hardware.declared.json",
     "gateway_url": "http://127.0.0.1:8090",
-    "max_approach_tilt_deg": 20,
-    "cad_mask_min_iou": 0.6,
-    "min_table_clearance_m": 0.01,
+    "max_approach_tilt_deg": "25",
+    "cad_mask_min_iou": "0.75",
+    "min_table_clearance_m": "0.005",
     "max_wrist_travel_deg": 90,
-    "min_engagement_depth_m": 0.02,
+    "min_engagement_depth_m": "0.015",
+    "num_particles": 32,
+    "robot_world_tolerance_m": 0.005,
+    "approach_distance_m": 0.15,
+    "lift_distance_m": 0.05,
+    "lift_hold_s": 1,
+    "approach_speed_factor": 0.9,
+    "descend_far_speed_factor": 0.7,
+    "descend_near_speed_factor": 0.7,
+    "lift_speed_factor": 0.7,
+    "home_speed_factor": 0.9,
+    "motion_timeout_s": 1,
     "table_support": "declared",
-    "viewer": true
+    "viewer": true,
+    "surrounding_obstacles": true
   },
   "sam3_reference": {
     "worker_socket": "/tmp/tiptop-{uid}/known-task.sock",
-    "reference_scene": "Lab/Uon_1F_Lab/table"
+    "reference_scene": "Lab/Uon_1F_Lab/table",
+    "sam3_confidence_threshold": "0.3",
+    "appearance_ranking": true,
+    "appearance_weight": 1
   },
   "gemini_er": {},
   "services": [
-    {"name": "관측 서버", "host": "127.0.0.1", "port": 13348, "modes": ["sam3_reference", "gemini_er"]},
-    {"name": "FoundationPose 서버", "host": "127.0.0.1", "port": 13346, "modes": ["sam3_reference", "gemini_er"]},
-    {"name": "SAM3 서버", "host": "127.0.0.1", "port": 13347, "modes": ["sam3_reference"]},
-    {"name": "Gateway", "host": "127.0.0.1", "port": 8090, "modes": ["sam3_reference", "gemini_er"]},
-    {"name": "작업 워커", "socket": "/tmp/tiptop-{uid}/known-task.sock", "modes": ["sam3_reference"]}
+    {
+      "name": "관측 서버",
+      "host": "127.0.0.1",
+      "port": 13348,
+      "modes": [
+        "sam3_reference",
+        "gemini_er"
+      ]
+    },
+    {
+      "name": "FoundationPose 서버",
+      "host": "127.0.0.1",
+      "port": 13346,
+      "modes": [
+        "sam3_reference",
+        "gemini_er"
+      ]
+    },
+    {
+      "name": "SAM3 서버",
+      "host": "127.0.0.1",
+      "port": 13347,
+      "modes": [
+        "sam3_reference"
+      ]
+    },
+    {
+      "name": "Gateway",
+      "host": "127.0.0.1",
+      "port": 8090,
+      "modes": [
+        "sam3_reference",
+        "gemini_er"
+      ]
+    },
+    {
+      "name": "작업 워커",
+      "socket": "/tmp/tiptop-{uid}/known-task.sock",
+      "modes": [
+        "sam3_reference"
+      ]
+    }
   ]
 }

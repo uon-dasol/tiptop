@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tiptop.object_catalog import registered_object
+from tiptop.object_catalog import load_catalog, registered_object, sequence_objects
 from tiptop.scripts import foundation_pose_server
 
 
@@ -82,3 +82,56 @@ def test_duplicate_class_cannot_select_a_different_database(tmp_path):
     )
     with pytest.raises(ValueError, match="Duplicate"):
         registered_object("cup", catalog_path=catalog, check_files=False)
+
+
+def bundled_assets(root, name):
+    mesh = root / name / "edited" / f"{name}.obj"
+    db = root / name / "UON_3finger_gripper" / f"{name}_UON_3finger_gripper_merged_grasp_zero_pose.json"
+    for path in (mesh, db):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    mesh.with_suffix(".mtl").touch()
+    return mesh, db
+
+
+def test_bundled_models_use_their_dataset_and_preserve_explicit_objects(tmp_path, monkeypatch):
+    original, extra = tmp_path / "original", tmp_path / "new"
+    old_mesh, old_db = bundled_assets(original, "cup")
+    bundled_assets(extra, "cup")  # A same-named discovered object cannot replace the explicit one.
+    mesh, db = bundled_assets(extra, "chair_leg_caps")
+    catalog = write_catalog(tmp_path, cad_root=str(original), db_root=str(original),
+        additional_datasets=[dict(root=str(extra), cad_scale_to_m=.001)],
+        objects=[dict(class_id="cup", cad=str(old_mesh), db=str(old_db), cad_scale_to_m=.001)])
+
+    old = registered_object("cup", catalog_path=catalog)
+    assert old["cad"] == old_mesh and old["db"] == old_db
+    new = registered_object("chair_leg_caps", catalog_path=catalog)
+    assert new["cad"] == mesh and new["db"] == db and new["cad_scale_to_m"] == .001
+    assert new["aliases"] == ["chair leg caps"]
+    assert len(sequence_objects(["all"], catalog_path=catalog)) == 2
+    monkeypatch.setattr(foundation_pose_server, "CATALOG", catalog)
+    assert foundation_pose_server.default_asset_root() == original
+    assert foundation_pose_server.additional_asset_roots() == [extra]
+    assert all(level == "ok" for level, _ in foundation_pose_server.cad_findings(original))
+    preloaded = foundation_pose_server.resolve_preload_objects(["chair_leg_caps"])
+    assert preloaded == [dict(class_id="chair_leg_caps", mesh_path=str(mesh), mesh_scale=.001)]
+
+    mesh.unlink()
+    with pytest.raises(FileNotFoundError) as error:
+        registered_object("chair_leg_caps", catalog_path=catalog)
+    assert error.value.args[0] == mesh
+
+
+def test_bundled_relative_root_and_missing_optional_dataset(tmp_path):
+    mesh, db = bundled_assets(tmp_path / "new", "cup")
+    catalog = write_catalog(tmp_path, additional_datasets=[dict(root="new", cad_scale_to_m=.001),
+        dict(root="unmounted", cad_scale_to_m=.001)], objects=[])
+    entry = registered_object("cup", catalog_path=catalog, asset_root=tmp_path)
+    assert entry["cad"] == mesh and entry["db"] == db
+
+
+@pytest.mark.parametrize("scale", [0, -1, float("nan"), float("inf")])
+def test_bundled_model_scale_must_be_explicit_and_positive(tmp_path, scale):
+    catalog = write_catalog(tmp_path, additional_datasets=[dict(root="new", cad_scale_to_m=scale)], objects=[])
+    with pytest.raises(ValueError, match="CAD scale"):
+        load_catalog(catalog)

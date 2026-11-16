@@ -84,3 +84,17 @@ def test_unexpected_planning_exception_is_not_retried():
     with pytest.raises(RuntimeError, match="model error"):
         run_known_planning(run, None, Config(), None, None, None, None, [])
     assert len(calls) == 1
+
+
+def test_each_search_pass_is_logged_with_its_result_time_and_a_readable_failure(capsys):
+    from tiptop.doosan.known_planning import failure_text
+
+    outcomes = iter([(None, .5, "No satisfying particles found after optimizing all 1 plan(s)"), ([dict(label="path")], 1.5, None)])
+    run_known_planning(lambda *args: next(outcomes), None, Config(), None, object(), None, None, None, try_feasible_first=True)
+    lines = capsys.readouterr().out.splitlines()
+    text = "\n".join(lines)
+    assert "1차 (만족 입자가 나오면 바로 모션 계획) 시작 · 입자 16개" in text
+    assert "1차 (만족 입자가 나오면 바로 모션 계획) 실패 · 0.5s · 제약을 만족한 입자가 없음" in text
+    assert "2차 (전체 최적화 + 일반 IK) 성공 · 1.5s" in text
+    assert failure_text("Motion planning failed for 6/6 satisfying particle(s)") == "만족한 입자 6개 중 6개 모두 모션 계획 실패"
+    assert failure_text("something else") == "something else"

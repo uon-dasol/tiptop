@@ -93,6 +93,19 @@ def test_changed_during_build_or_outside_root_never_enters_cache(tmp_path):
         store.get(outside)
 
 
+def test_additional_dataset_models_are_allowed_without_allowing_other_nas_folders(tmp_path):
+    original, extra = tmp_path / "original", tmp_path / "new"
+    first, second = item(original), item(extra, "two")
+    store = assets.EstimatorStore(original, lambda **kw: object(), additional_asset_roots=[extra])
+    assert store.prepare([first, second])["success"]
+    with pytest.raises(ValueError, match="asset root"):
+        store.get(item(tmp_path / "outside"))
+    escaped = extra / "escape.obj"
+    escaped.symlink_to(item(tmp_path / "outside", "escape")["mesh_path"])
+    with pytest.raises(ValueError, match="asset root"):
+        store.validate(dict(mesh_path=str(escaped), mesh_scale=.001, class_id="escape"))
+
+
 def test_http_prepare_runs_no_estimation_and_each_estimate_is_fresh(tmp_path):
     selected, calls = item(tmp_path), []
     store = assets.EstimatorStore(tmp_path, lambda **kw: object())

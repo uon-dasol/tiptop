@@ -1,0 +1,77 @@
+diff --git a/cutamp/config.py b/cutamp/config.py
+index 2efaa53..f0c911a 100644
+--- a/cutamp/config.py
++++ b/cutamp/config.py
+@@ -26,6 +26,9 @@ class TAMPConfiguration:
+     # M2T2 Grasps which will be used first, and then grasp_dof fallback
+     m2t2_grasps: bool = False
+ 
++    # Give each particle one supplied grasp, in the supplied order, instead of sampling them randomly
++    ordered_grasps: bool = False
++
+     # Approach to use. Note: optimization includes particle initialization (i.e., sampling)
+     approach: Literal["optimization", "sampling"] = "optimization"
+ 
+diff --git a/cutamp/particle_initialization.py b/cutamp/particle_initialization.py
+index 4b3f96b..c89a9c6 100644
+--- a/cutamp/particle_initialization.py
++++ b/cutamp/particle_initialization.py
+@@ -39,6 +39,11 @@ from cutamp.utils.shapes import MultiSphere
+ _log = logging.getLogger(__name__)
+ 
+ 
++def ordered_grasp_indices(num_grasps: int, num_particles: int, device) -> torch.Tensor:
++    """One particle per supplied grasp in the supplied order; surplus particles repeat the grasps cyclically."""
++    return torch.arange(num_particles, device=device) % num_grasps
++
++
+ class ParticleInitializer:
+     def __init__(self, world: TAMPWorld, config: TAMPConfiguration, grasps: dict[str, dict] | None = None):
+         if config.enable_traj:
+@@ -133,10 +138,15 @@ class ParticleInitializer:
+                     _log.debug(f"Using M2T2 grasps for {obj}")
+                     provided_grasps = self.grasps[obj]["grasps_obj"]
+                     confs = self.grasps[obj]["confidences_pt"]
+-                    # Sample randomly with replacement if needed
+-                    sample_idxs = torch.randint(
+-                        0, provided_grasps.shape[0], (num_samples,), device=provided_grasps.device
+-                    )
++                    if config.ordered_grasps:
++                        sample_idxs = ordered_grasp_indices(
++                            provided_grasps.shape[0], num_particles, provided_grasps.device
++                        )
++                    else:
++                        # Sample randomly with replacement if needed
++                        sample_idxs = torch.randint(
++                            0, provided_grasps.shape[0], (num_samples,), device=provided_grasps.device
++                        )
+                     sampled_grasps = provided_grasps[sample_idxs]
+                     sampled_confs = confs[sample_idxs]
+                     obj_from_grasp = sampled_grasps
+@@ -162,7 +172,7 @@ class ParticleInitializer:
+ 
+                     if sampled_confs is not None:
+                         cfree_confs = sampled_confs[collision_free_mask]
+-                        sort_idxs = torch.argsort(cfree_confs, descending=True)[:num_particles]
++                        sort_idxs = torch.argsort(cfree_confs, descending=True, stable=config.ordered_grasps)[:num_particles]
+                         selected_grasps = cfree_grasps[sort_idxs]
+                         selected_confs = cfree_confs[sort_idxs]
+                     else:
+@@ -176,9 +186,14 @@ class ParticleInitializer:
+ 
+                 # Sample with replacement if we don't have enough grasps
+                 if selected_grasps.shape[0] < num_particles:
+-                    sample_idxs = torch.randint(
+-                        0, selected_grasps.shape[0], (num_particles,), device=selected_grasps.device
+-                    )
++                    if config.ordered_grasps:
++                        sample_idxs = ordered_grasp_indices(
++                            selected_grasps.shape[0], num_particles, selected_grasps.device
++                        )
++                    else:
++                        sample_idxs = torch.randint(
++                            0, selected_grasps.shape[0], (num_particles,), device=selected_grasps.device
++                        )
+                     selected_grasps = selected_grasps[sample_idxs]
+                     if selected_confs is not None:
+                         selected_confs = selected_confs[sample_idxs]

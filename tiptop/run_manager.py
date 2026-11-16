@@ -8,6 +8,7 @@ from collections import deque
 from pathlib import Path
 
 from tiptop.launcher import build_command, display_command
+from tiptop.task_logging import LOG_OWNER_ENV, TerminalLog
 
 
 class RunManager:
@@ -36,7 +37,7 @@ class RunManager:
             process = subprocess.Popen(
                 command, cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 encoding="utf-8", errors="replace", bufsize=1, start_new_session=True,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                env={**os.environ, "PYTHONUNBUFFERED": "1", LOG_OWNER_ENV: "launcher"},
             )
             self._process = process
         threading.Thread(target=self._read, args=(process,), daemon=True).start()
@@ -48,9 +49,34 @@ class RunManager:
             self._count += 1
 
     def _read(self, process) -> None:
-        for line in process.stdout:
-            self._append(line.rstrip("\n"))
-        self._append(f"[종료 코드 {process.wait()}]")
+        log, pending = None, []
+
+        def record(text):
+            nonlocal log
+            if log is not None:
+                log.write(text + "\n")
+            else:
+                pending.append(text)
+                if text.startswith("TASK_OUTPUT "):
+                    try:
+                        output = (self.cwd / text.removeprefix("TASK_OUTPUT ")).resolve()
+                        if not output.is_relative_to(self.cwd.resolve()):
+                            raise ValueError("Task log output is outside the project directory")
+                        log = TerminalLog(output / "terminal.log")
+                        for line in pending:
+                            log.write(line + "\n")
+                        pending.clear()
+                    except (OSError, ValueError) as error:
+                        self._append(f"[로그 저장 실패] {error}")
+            self._append(text)
+
+        try:
+            for line in process.stdout:
+                record(line.rstrip("\n"))
+            record(f"[종료 코드 {process.wait()}]")
+        finally:
+            if log is not None:
+                log.close()
 
     def stop(self) -> bool:
         """Send Ctrl+C to the script. This is not a robot emergency stop."""

@@ -10,6 +10,7 @@ import os
 import secrets
 import socket
 import stat
+from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
@@ -27,6 +28,45 @@ def service_up(service):
             return True
     except OSError:
         return False
+
+
+def snapshot_target_label(data, task_output):
+    """Read explicit target identity, including snapshots made by older workers."""
+    labels = {box["label"] for box in data.get("boxes", [])}
+    if data.get("target_label") in labels:
+        return data["target_label"]
+    for filename in ("semantic-task.json", "registered-pose.json"):
+        try:
+            saved = json.loads((Path(task_output) / filename).read_text())
+            candidates = [atom["args"][0] for atom in saved.get("grounded_atoms", []) if atom.get("args")]
+            candidates.append(saved.get("label"))
+            for label in candidates:
+                if label in labels:
+                    return label
+        except (OSError, ValueError, KeyError):
+            continue
+    return None
+
+
+@lru_cache(maxsize=32)
+def _saved_rgb_camera(path, modified_ns, width, height):
+    import numpy as np
+    from tiptop.perception_preview import rgb_camera_view
+
+    with np.load(path, allow_pickle=False) as packet:
+        return rgb_camera_view(packet["world_from_cam"], packet["intrinsics"], width, height)
+
+
+def snapshot_rgb_camera(data, task_output):
+    """Recover this observation's rotated RGB calibration for older workers."""
+    camera = data.get("obstacle_scene", {}).get("camera")
+    if camera is not None:
+        return camera
+    path = Path(task_output) / "observation.npz"
+    try:
+        return _saved_rgb_camera(path, path.stat().st_mtime_ns, data["width"], data["height"])
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 def make_server(root, *, port=8091, task_output=None, launcher=None, presets_path=PRESETS_PATH):
@@ -120,6 +160,10 @@ def make_server(root, *, port=8091, task_output=None, launcher=None, presets_pat
                         return self.reply(200, b'{"waiting":true}', "application/json")
                     path = max(paths, key=lambda p: p.stat().st_mtime_ns)
                     data = json.loads(path.read_text())
+                    if data.get("detector") == "sam3_reference":
+                        data["target_label"] = snapshot_target_label(data, path.parent.parent)
+                    if data.get("obstacle_scene") is not None:
+                        data["obstacle_scene"]["camera"] = snapshot_rgb_camera(data, path.parent.parent)
                     data["task_directory"] = str(path.parent.parent.relative_to(root))
                     data["images"] = {
                         key: "/image?path=" + quote(str((path.parent / value).relative_to(root)), safe="")

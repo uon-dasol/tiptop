@@ -24,13 +24,14 @@ def cad_findings(asset_root: Path) -> list[Finding]:
         return [("warn", f"Registered-object catalog not found: {CATALOG}; CAD files were not checked")]
     findings = []
     catalog = load_catalog(CATALOG)
+    allowed_roots = [asset_root.resolve(), *additional_asset_roots()]
     for entry in catalog["objects"]:
         name, obj = entry["class_id"], asset_path(catalog, entry, "cad")
         problems = []
         if not obj.is_file():
             problems.append(f"CAD for {name} not found: {obj}")
         else:
-            if not obj.is_relative_to(asset_root.resolve()):
+            if not any(obj.is_relative_to(root) for root in allowed_roots):
                 problems.append(f"CAD for {name} is outside the asset root {asset_root}; the server will reject it")
             mtl = obj.with_suffix(".mtl")
             if not mtl.is_file():
@@ -65,6 +66,12 @@ def default_asset_root():
     return (ROOT / Path(catalog.get("cad_root", "data")).expanduser()).resolve()
 
 
+def additional_asset_roots():
+    """Allow bundled CADs only under explicitly configured additional datasets."""
+    return [(ROOT / Path(dataset["root"]).expanduser()).resolve()
+            for dataset in load_catalog(CATALOG).get("additional_datasets", [])]
+
+
 def resolve_preload_objects(class_ids):
     from tiptop.object_catalog import sequence_objects
 
@@ -83,7 +90,7 @@ def main():
     from tiptop_server.server import main as serve
 
     serve(default_asset_root=default_asset_root(), extra_findings=cad_findings,
-          resolve_preload_objects=resolve_preload_objects)
+          resolve_preload_objects=resolve_preload_objects, default_additional_asset_roots=additional_asset_roots())
 
 
 if __name__ == "__main__":

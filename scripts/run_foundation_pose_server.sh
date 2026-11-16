@@ -3,7 +3,7 @@
 #   bash scripts/run_foundation_pose_server.sh [--check] [--port N] [--asset-root DIR]
 # Uses the foundationpose conda env and the server in the FoundationPose submodule (README_CUSTOM.md).
 # --check only reports missing prerequisites (no GPU). Override the interpreter with FOUNDATIONPOSE_PYTHON.
-# The default allowed CAD root comes from tiptop/config/known_objects.json (cad_root).
+# Allowed CAD roots come from tiptop/config/known_objects.json (cad_root and additional_datasets).
 
 set -eo pipefail
 
