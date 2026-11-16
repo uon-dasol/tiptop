@@ -25,8 +25,8 @@ def plan():
 
 
 class Client:
-    def __init__(self, *, moved=False, fail=False, cancelled=None):
-        self.calls, self.moved, self.fail, self.cancelled = [], moved, fail, cancelled
+    def __init__(self, *, moved=False, fail=False, cancelled=None, error="trajectory failed"):
+        self.calls, self.moved, self.fail, self.cancelled, self.error = [], moved, fail, cancelled, error
         self.position = 213
 
     def get_state(self):
@@ -50,7 +50,7 @@ class Client:
         self.calls.append("move")
         if self.cancelled is not None:
             self.cancelled.set()
-        return dict(success=not self.fail, error="trajectory failed")
+        return dict(success=not self.fail, error=self.error)
 
     def close_gripper(self, **kwargs):
         self.calls.append("close")
@@ -248,3 +248,12 @@ def test_execution_timings_separate_initial_opening_from_planned_motion(tmp_path
     report = json.loads(path.read_text())
     assert report["execution_timings"] == result["execution_timings"]
     assert [event["duration_s"] for event in report["events"]] == [2, 5, 1]
+
+
+@pytest.mark.parametrize("status,code,color,words", [(5, 0, "\033[33m", "취소됨"), (6, -5, "\033[31m", "중단됨")])
+def test_trajectory_failure_is_explained_in_korean_with_matching_color(capsys, status, code, color, words):
+    client = Client(fail=True, error=f"Trajectory failed: status={status}, code={code}, ")
+    with pytest.raises(ExecutionFailure):
+        execute_measured_plan(plan(), client)
+    out = capsys.readouterr().out
+    assert color in out and words in out and f"status={status}" in out

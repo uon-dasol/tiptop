@@ -113,3 +113,16 @@ def test_execution_stops_before_gripper_after_arm_failure():
     with pytest.raises(ExecutionFailure, match="goal rejected"):
         execute_cutamp_plan(steps, Client())
     assert calls == ["arm"]
+
+
+def test_trajectory_error_description_names_status_and_code_in_korean():
+    from tiptop.doosan.client import describe_trajectory_error
+
+    text, color = describe_trajectory_error("Trajectory failed: status=5, code=0, ")
+    assert color == "\033[33m" and "취소됨" in text and "CANCELED" in text and "SUCCESSFUL" in text
+    text, color = describe_trajectory_error(
+        "Trajectory failed: status=6, code=-5, Aborted due to goal_time_tolerance exceeding by 5.000003 seconds")
+    assert color == "\033[31m" and "중단됨" in text and "ABORTED" in text and "GOAL_TOLERANCE_VIOLATED" in text
+    text, color = describe_trajectory_error("Trajectory failed: status=9, code=-9, ")
+    assert color == "\033[31m" and "알 수 없는 상태" in text and "알 수 없는 코드" in text
+    assert describe_trajectory_error("goal rejected") is None and describe_trajectory_error(None) is None

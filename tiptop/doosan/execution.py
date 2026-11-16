@@ -6,7 +6,7 @@ from pathlib import Path
 import threading
 import time
 
-from tiptop.doosan.client import validate_plan_backend
+from tiptop.doosan.client import describe_trajectory_error, validate_plan_backend
 from tiptop.doosan.readiness import check_gateway_state
 from tiptop.execute_plan import ExecutionFailure, execute_cutamp_plan
 
@@ -64,6 +64,9 @@ def execute_measured_plan(plan, client, *, cancelled=None, report_path=None):
                 _log.info("Physical execution stage: %s", stage)
                 try:
                     result = getattr(client, name)(*args, **kwargs)
+                    explanation = describe_trajectory_error(result.get("error")) if result else None
+                    if explanation:
+                        print(f"{explanation[1]}{explanation[0]}\033[0m", flush=True)
                     stopped = result.get("stop_result") if result else None
                     if stopped and stopped.get("success") is True and stopped.get("arm_stop_acknowledged") is True:
                         acknowledged_stop = stopped
