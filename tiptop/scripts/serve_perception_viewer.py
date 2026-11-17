@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 from tiptop.launcher import FIELDS, KINDS, MODES, PRESETS_PATH, load_presets, save_preset
-from tiptop.object_catalog import load_catalog
+from tiptop.object_catalog import demo_order, load_catalog
 from tiptop.run_manager import RunManager
 
 
@@ -81,7 +81,9 @@ def make_server(root, *, port=8091, task_output=None, launcher=None, presets_pat
         if method == "GET" and path == "/api/presets":
             return 200, dict(fields=FIELDS, modes=list(MODES), kinds=list(KINDS), **load_presets(presets_path))
         if method == "GET" and path == "/api/objects":
-            return 200, dict(objects=[dict(class_id=item["class_id"], name_ko=item["name_ko"])
+            demo = demo_order()
+            return 200, dict(objects=[dict(class_id=item["class_id"], name_ko=item["name_ko"],
+                                           demo=demo.get(item["class_id"]))
                                       for item in load_catalog()["objects"]])
         if method == "GET" and path == "/api/status":
             services = [dict(name=item["name"], modes=item["modes"], up=service_up(item))

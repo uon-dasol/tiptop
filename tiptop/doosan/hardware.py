@@ -7,6 +7,7 @@ separate transform and must never be substituted with the body-envelope pose.
 
 import hashlib
 import json
+import shutil
 import xml.etree.ElementTree as ET
 from copy import deepcopy
 from pathlib import Path
@@ -153,6 +154,33 @@ def derive_mount_urdf(source, destination, *, link_6_from_gripper_body, gripper_
     destination.parent.mkdir(parents=True, exist_ok=True)
     tree.write(destination, encoding="utf-8", xml_declaration=True)
     return destination
+
+
+HARDWARE_CACHE = Path(__file__).resolve().parents[2] / "tiptop_outputs/m1013/hardware-model-cache"
+_PREPARED = {}
+
+
+def cached_hardware_model(profile, record_dir=None):
+    """`prepare_hardware_model` once per profile and process, built in a content-keyed folder that outlives tasks.
+
+    The key covers the reviewed profile and the original model files. `record_dir` receives a copy of the
+    generated files so a task folder still shows the model it used.
+    """
+    from tiptop.doosan.model import ASSETS
+
+    digest = hashlib.sha256(hardware_profile_fingerprint(profile).encode())
+    for name in ("m1013_uon.urdf", "m1013_uon.yml"):
+        digest.update((ASSETS / name).read_bytes())
+    key = digest.hexdigest()[:16]
+    folder = HARDWARE_CACHE / key
+    if key not in _PREPARED:
+        _PREPARED[key] = prepare_hardware_model(profile, folder)
+    cached = _PREPARED[key]
+    prepared = dict(cached, robot_config=deepcopy(cached["robot_config"]),
+                    fixed_obstacles=deepcopy(cached["fixed_obstacles"]), gripper_spheres=cached["gripper_spheres"].copy())
+    if record_dir is not None:
+        shutil.copytree(folder, record_dir, dirs_exist_ok=True)
+    return prepared
 
 
 def prepare_hardware_model(profile, output):

@@ -48,22 +48,6 @@ def upstream():
     return SimpleNamespace(solver=solver, costs=costs, initialization=initialization)
 
 
-def test_fixed_destination_reaches_pick_roi_edge_and_physical_box_stays_at_15_cm(scene):
-    original, observed, full = scene
-    settings = TaskSettings(preset="fixed_box")
-    env, region = prepare_task_environment(original, observed, settings, fixed_obstacles=[full])
-    box = next(item for item in env.statics if item.name == FIXED_BOX_NAME)
-    assert box.dims == [.35, .20, .15]
-    assert box.pose[:3] == [0, .35, .075]
-    assert region["support_z_m"] == .15 and region["release_bottom_z_m"] == .15
-    assert env.goal_state == frozenset({On.ground("object", FIXED_BOX_NAME), HandEmpty.ground()})
-    assert original.goal_state == frozenset({Holding.ground("object")})
-    assert len(original.statics) == 1
-    assert box.pose[1] + box.dims[1]/2 == pytest.approx(.45)  # Stops before the red tape strip (Y=0.452).
-    again, _ = prepare_task_environment(env, observed, settings, fixed_obstacles=[full])
-    assert sum(item.name == FIXED_BOX_NAME for item in again.statics) == 1
-
-
 def test_home_drop_holds_the_object_and_models_the_box_as_four_5_mm_walls(scene):
     original, observed, full = scene
     settings = TaskSettings(preset="home_drop")
@@ -80,48 +64,38 @@ def test_home_drop_holds_the_object_and_models_the_box_as_four_5_mm_walls(scene)
     assert walls[f"{FIXED_BOX_NAME}_wall_front"].dims[1] == pytest.approx(.005)
     assert walls[f"{FIXED_BOX_NAME}_wall_left"].dims[0] == pytest.approx(.005)
     np.testing.assert_allclose(settings.drop_region()["size_xy_m"], [.34, .19])
-    # Re-preparing an environment that already holds the solid box swaps it for the walls.
-    solid, _ = prepare_task_environment(original, observed, TaskSettings(preset="fixed_box"), fixed_obstacles=[full])
-    again, _ = prepare_task_environment(solid, observed, settings, fixed_obstacles=[full])
-    assert all(item.name != FIXED_BOX_NAME for item in again.statics)
+    # Preparing an already prepared environment again keeps exactly the four walls.
+    again, _ = prepare_task_environment(env, observed, settings, fixed_obstacles=[full])
     assert sum(item.name.startswith(FIXED_BOX_NAME) for item in again.statics) == 4
+    assert len(original.statics) == 1
 
 
 def test_home_drop_only_asks_perception_for_the_object():
     settings = TaskSettings(preset="home_drop")
-    assert settings.perception_instruction("ice_pack 집고 초기 위치에서 떨어뜨려") == "ice_pack 집어"
-    with pytest.raises(ValueError, match="초기 위치에서 떨구기"):
+    assert settings.perception_instruction("ice_pack 집고 박스에 놓아") == "ice_pack 집어"
+    with pytest.raises(ValueError, match="박스에 놓기"):
         settings.perception_instruction("ice_pack")
 
 
-def test_box_remains_a_physical_obstacle_when_in_place_is_selected(scene):
-    original, observed, full = scene
-    env, _ = prepare_task_environment(original, observed, TaskSettings(fixed_box_present=False), fixed_obstacles=[full])
-    assert env.goal_state == frozenset({Holding.ground("object")})
-    assert any(item.name == FIXED_BOX_NAME for item in env.statics)
-    assert all(item.name != FIXED_BOX_NAME for item in env.type_to_objects["Surface"])
-    assert len(original.statics) == 1
-
-
-@pytest.mark.parametrize("preset", ["in_place_return", "fixed_box", "perceived_surface"])
+@pytest.mark.parametrize("preset", ["home_drop", "perceived_surface"])
 def test_installed_workspace_box_cannot_be_disabled_by_a_stale_task_payload(preset):
     assert TaskSettings(preset=preset, fixed_box_present=False).fixed_box_present
 
 
 @pytest.mark.parametrize("options", [dict(box_center_x_m=.38), dict(box_center_y_m=1.24), dict(box_bottom_z_m=.05)])
-def test_fixed_destination_must_fit_on_the_real_full_table(scene, options):
+def test_box_must_fit_on_the_real_full_table(scene, options):
     env, observed, full = scene
     with pytest.raises(ValueError, match="tabletop"):
-        prepare_task_environment(env, observed, TaskSettings(preset="fixed_box", **options), fixed_obstacles=[full])
+        prepare_task_environment(env, observed, TaskSettings(preset="home_drop", **options), fixed_obstacles=[full])
     with pytest.raises(ValueError, match="configured_full_table"):
-        prepare_task_environment(env, observed, TaskSettings(preset="fixed_box"))
+        prepare_task_environment(env, observed, TaskSettings(preset="home_drop"))
 
 
 @pytest.mark.parametrize("options", [dict(release_height_m=-.01), dict(release_height_m=float("nan")),
                                     dict(box_size_x_m=0), dict(box_center_y_m=float("inf"))])
 def test_invalid_destination_parameters_are_rejected(options):
     with pytest.raises(ValueError):
-        TaskSettings(preset="fixed_box", **options)
+        TaskSettings(preset="home_drop", **options)
 
 
 def test_perceived_on_goal_reuses_its_surface_and_retains_installed_fixed_box(scene):
@@ -152,22 +126,19 @@ def test_perceived_table_support_is_corrected_once_even_when_prepared_again(scen
 def test_launcher_and_worker_parser_keep_placement_separate_from_perception(mode):
     from tiptop.scripts.run_known_pick_place import parse_args
 
-    values = dict(load_presets()["presets"][mode], task="후추통 집고 박스에 놓아", task_preset="fixed_box")
+    values = dict(load_presets()["presets"][mode], task="후추통 집고 박스에 놓아", task_preset="home_drop")
     for height in (.05, 0):
         command = build_command(mode, dict(values, release_height_m=height), "plan")
         assert not {"--execute", "--check", "--gateway-url"} & set(command)
         args = parse_args(command[3:])
-        assert args.task_settings.preset == "fixed_box" and args.task_settings.release_height_m == 0
+        assert args.task_settings.preset == "home_drop" and args.task_settings.release_height_m == 0
         assert not any(key.startswith("--box-") for key in command)
         # Explicit CLI overrides remain available for deliberate offline experiments.
         args = parse_args([*command[3:], "--release-height-m", str(height)])
         assert args.task_settings.release_height_m == height
         assert args.task_settings.perception_instruction(args.task) == "black_pepper_shaker 집어"
-    args = parse_args(build_command(mode, dict(values, task_preset="in_place_return"), "plan")[3:])
-    assert args.task_settings.preset == "in_place_return"  # previous worker request does not leak.
-    assert args.task_settings.fixed_box_present  # Installed geometry survives every task switch.
-    retained = parse_args(build_command(mode, dict(values, task_preset="in_place_return", fixed_box_present=True), "plan")[3:])
-    assert retained.task_settings.fixed_box_present
+    args = parse_args(build_command(mode, dict(values, fixed_box_present=False), "plan")[3:])
+    assert args.task_settings.fixed_box_present  # Installed geometry cannot be disabled by a stale payload.
 
 
 def test_release_height_offsets_sampling_and_support_cost_and_restores_both(upstream, monkeypatch):
@@ -381,12 +352,11 @@ def test_existing_solver_generates_pick_attached_transport_release_and_home(upst
     assert torch.equal(particle["q0"], torch.tensor([0.,.9,.6,0,0,0]))
 
 
-def test_placement_preview_projects_physical_box_and_release_height_separately(scene, tmp_path):
+def test_placement_preview_projects_physical_box_and_release_height_separately(tmp_path):
     import json
     from tiptop.perception_preview import TaskPreview
 
-    env, observed, full = scene
-    _, region = prepare_task_environment(env, observed, TaskSettings(preset="fixed_box", release_height_m=.05), fixed_obstacles=[full])
+    region = TaskSettings(preset="home_drop", release_height_m=.05).box_region()
     preview = TaskPreview(tmp_path, observation_id="offline", task="test", depth_source="saved")
     preview.update("observation", dict(rgb=np.zeros((720,1280,3), np.uint8)))
     camera = np.diag([-1., 1., -1., 1.])

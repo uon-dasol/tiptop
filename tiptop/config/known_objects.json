@@ -110,7 +110,7 @@
     },
     {
       "class_id": "kids_toy_guitar",
-      "name_ko": "장난감 기타",
+      "name_ko": "장난감기타",
       "visual_description": "This kids toy guitar features mini guitar body, short neck, and dark finish. visible colors include black and apricot.",
       "aliases": [
         "장난감 기타",
@@ -172,7 +172,7 @@
     },
     {
       "class_id": "porsche_911_toy_car",
-      "name_ko": "장난감 차",
+      "name_ko": "장난감차",
       "visual_description": "This porsche 911 toy car features toy car, red wheels, black windows, orange body, Porsche shape, and miniature car body. visible colors include orange, black, and red.",
       "aliases": [
         "포르쉐911 장난감 차",
@@ -270,7 +270,7 @@
     },
     {
       "class_id": "t_shaped_3_outlet_adapter",
-      "name_ko": "3구 멀티탭",
+      "name_ko": "3구멀티탭",
       "visual_description": "This t shaped 3 outlet adapter features white, plug, T-shaped 3-outlet body, plug socket openings, and compact adapter. visible colors include white and silver.",
       "aliases": [
         "T자 3구 멀티탭",
@@ -306,7 +306,7 @@
     },
     {
       "class_id": "washing_machine_cleaner_bottle",
-      "name_ko": "세탁조 클리너",
+      "name_ko": "세탁조클리너",
       "visual_description": "This washing machine cleaner bottle features yellow cap, orange body, \"홈스타 퍼펙트 세탁조 클리너\" text, and cleaner label. visible colors include orange, white, and yellow.",
       "aliases": [
         "홈스타 퍼펙트 세탁조 클리너",
@@ -343,7 +343,7 @@
     },
     {
       "class_id": "paper_towel_stand",
-      "name_ko": "휴지 거치대",
+      "name_ko": "휴지거치대",
       "visual_description": "A brown item with a round base, stick-type center axis, and wooden material.",
       "aliases": [
         "키친타올 거치대",
@@ -369,7 +369,7 @@
     },
     {
       "class_id": "chair_leg_caps",
-      "name_ko": "의자 다리 커버",
+      "name_ko": "의자다리커버",
       "visual_description": "A brown chair leg cap with rounded square cap, soft cover shape, dark seams.",
       "aliases": [
         "의자 다리 커버",
@@ -405,7 +405,7 @@
     },
     {
       "class_id": "dumbbell_dog_squeaky_toy",
-      "name_ko": "아령 모양 장난감",
+      "name_ko": "아령모양장난감",
       "visual_description": "A green, white dog toy with dumbbell shape, raised paw graphics, squeaky toy body.",
       "aliases": [
         "아령 모양 장난감",
@@ -417,7 +417,7 @@
     },
     {
       "class_id": "dust_air_blower_pump",
-      "name_ko": "먼지 제거 펌프",
+      "name_ko": "먼지제거펌프",
       "visual_description": "A black blower pump with rubber bulb body, long nozzle, handheld pump shape.",
       "aliases": [
         "먼지 제거 펌프",
@@ -429,7 +429,7 @@
     },
     {
       "class_id": "fish_shaped_pet_latex_toy",
-      "name_ko": "물고기 모양 장난감",
+      "name_ko": "물고기모양장난감",
       "visual_description": "A yellow pet toy with fish shape, raised fins, latex toy texture.",
       "aliases": [
         "물고기 모양 장난감",
@@ -441,7 +441,7 @@
     },
     {
       "class_id": "homestar_mold_remover_paste",
-      "name_ko": "곰팡이 제거제",
+      "name_ko": "곰팡이제거제",
       "visual_description": "A red, white tube with paste tube, Korean text, white cap.",
       "aliases": [
         "곰팡이 제거제",
@@ -453,7 +453,7 @@
     },
     {
       "class_id": "pat_and_mat_doll",
-      "name_ko": "패트와 매트 인형",
+      "name_ko": "패트와매트인형",
       "visual_description": "A yellow, black, blue doll with character body, blue hat, standing doll shape.",
       "aliases": [
         "패트와 매트 인형",

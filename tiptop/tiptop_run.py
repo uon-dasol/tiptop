@@ -28,6 +28,7 @@ from jaxtyping import Bool, Float
 from scipy.spatial import KDTree
 
 from tiptop.config import load_calibration, tiptop_cfg
+from tiptop.console import log_tag
 from tiptop.execute_plan import execute_cutamp_plan
 from tiptop.motion_planning import build_curobo_solvers, go_to_capture
 from tiptop.perception.cad_cache import load_cad_mesh
@@ -49,6 +50,7 @@ from tiptop.perception.placement import (
     table_support_z,
 )
 from tiptop.perception.sam2 import sam2_client
+from tiptop.perception.sam3_reference import log_scene_object_scores
 from tiptop.perception.segmentation import (
     masked_object_points,
     segment_pointcloud_by_masks,
@@ -56,7 +58,7 @@ from tiptop.perception.segmentation import (
 )
 from tiptop.perception.shape_completion import reconstruct_objects_with_recgen
 from tiptop.perception.utils import convert_trimesh_box_to_curobo_cuboid, convert_trimesh_to_curobo_mesh
-from tiptop.perception_wrapper import run_visual_perception
+from tiptop.perception_wrapper import attach_scene_objects, run_visual_perception
 from tiptop.planning import build_tamp_config, run_planning, save_tiptop_plan, serialize_plan
 from tiptop.recording import (
     record_cameras,
@@ -632,7 +634,6 @@ async def run_perception(
     grasp_provider: str | None = None,
     client=None,
     active_task=None,
-    in_place_return=False,
     pick_only=False,
     registered_grasp_from_tcp=None,
     perception_mode=None,
@@ -647,10 +648,13 @@ async def run_perception(
     table_support: str = "ransac-cad",
     declared_table: Cuboid | None = None,
     surrounding_obstacles: bool = True,
+    minimal_records: bool = False,
 ) -> tuple[TAMPEnvironment, list, ProcessedScene, list[dict]]:
     """Run perception. With `background_tasks`, saving outputs is appended there instead of awaited."""
     if background_tasks is not None and log_to_rerun:
         raise ValueError("log_to_rerun needs the saved visualizations, so it cannot defer saving")
+    if minimal_records and log_to_rerun:
+        raise ValueError("log_to_rerun needs the saved visualizations, so it cannot run with minimal records")
     start_time = time.perf_counter()
 
     cfg = tiptop_cfg()
@@ -683,8 +687,10 @@ async def run_perception(
         reference_scene=reference_scene,
         sam3_confidence_threshold=sam3_confidence_threshold,
         appearance_weight=appearance_weight,
+        scene_objects=surrounding_obstacles,
         on_update=None if preview is None else preview.update,
     )
+    scene_objects_job = results.pop("scene_objects_job", None)  # the `object` query runs while the target is verified
     save_dir.mkdir(parents=True, exist_ok=True)
 
     def write_semantic_task(current, trials=None):
@@ -712,7 +718,6 @@ async def run_perception(
         diagnostics = current.get("reference_diagnostics")
         if diagnostics is None or not trials or trials[0]["candidate_index"] is None:
             return
-        from tiptop.console import log_tag
         from tiptop.perception.sam3_reference import save_candidate_crops, save_reference_image
 
         try:
@@ -725,6 +730,7 @@ async def run_perception(
         except Exception as error:
             _log.warning("Reference image copy skipped: %s", error)
     registered_grasps = None
+    candidate_crops = None
     if provider == "m2t2":
         results["grasps"] = await generate_grasps_async(
             session,
@@ -756,13 +762,24 @@ async def run_perception(
                 cad_mask_min_iou=cad_mask_min_iou,
             )
         except SilhouetteMismatchError as error:
+            if scene_objects_job is not None:
+                scene_objects_job.cancel()
             write_semantic_task(results, error.trials)
             save_candidate_images(results, error.trials)
             raise
+        except BaseException:
+            if scene_objects_job is not None:
+                scene_objects_job.cancel()
+            raise
+        if scene_objects_job is not None:
+            results = await attach_scene_objects(results, scene_objects_job, record_scores=not minimal_records)
+            if not minimal_records:
+                log_scene_object_scores(results["reference_diagnostics"]["scene_objects"])
         registered_grasps = {label: registered}
         if trials[0]["candidate_index"] is not None:
             write_semantic_task(results, trials)
-            save_candidate_images(results, trials)
+            if not minimal_records:
+                candidate_crops = asyncio.create_task(asyncio.to_thread(save_candidate_images, results, trials))
             if preview is not None and trials[-1]["rank"] > 1:
                 await asyncio.to_thread(preview.update, "detection", results)
         results["grasps"] = {}
@@ -786,11 +803,13 @@ async def run_perception(
             )
     else:
         raise ValueError(f"Unknown grasp provider: {provider}")
+    if preview is not None:
+        await asyncio.to_thread(preview.update, "target_final", {})
     _log.info(f"Capturing observation and running perception APIs took {time.perf_counter() - start_time:.2f}s")
 
     # Save results (ProcessPoolExecutor for live mode, default thread pool for h5 mode)
     loop = asyncio.get_running_loop()
-    save_future = loop.run_in_executor(
+    save_future = None if minimal_records else loop.run_in_executor(
         _executor_pool,
         save_perception_outputs,
         rgb,
@@ -840,21 +859,24 @@ async def run_perception(
         table_support=table_support,
         declared_table=declared_table,
     )
+    saving = [task for task in (save_future, candidate_crops) if task is not None]
     if background_tasks is None:
-        processed_scene, save_result = await asyncio.gather(process_coroutine, save_future)
+        processed_scene, *saved = await asyncio.gather(process_coroutine, *saving)
+        save_result = saved[0] if save_future is not None else None
     else:
-        background_tasks.append(save_future)
+        background_tasks.extend(saving)
         processed_scene = await process_coroutine
     processed_scene.perception_results = results
 
-    if (in_place_return or pick_only) and provider != "known_db":
-        raise ValueError("In-place return and preset picking require a known CAD target")
+    if pick_only and provider != "known_db":
+        raise ValueError("Preset picking requires a known CAD target")
+    if scene_objects_job is not None and provider != "known_db":
+        scene_objects_job.cancel()
+        raise ValueError("Surrounding obstacles from the object reference require the known-DB provider")
     if provider == "known_db":
         from tiptop.doosan.in_place import source_region
-        from tiptop.perception.known_objects import registered_target, require_return_in_place
+        from tiptop.perception.known_objects import registered_target
 
-        if in_place_return and results["semantic_source"] == "gemini":
-            require_return_in_place(results["grounded_atoms"])
         label, entry = registered_target(results["bboxes"], results["grounded_atoms"])
         estimate = processed_scene.grasps[label]["registered"]["pose"]["world_from_cad"]
         vertices = load_cad_mesh(entry["cad"], entry["cad_scale_to_m"]).vertices
@@ -865,7 +887,7 @@ async def run_perception(
         pick_region["table_support"] = processed_scene.table_support
         if preview is not None:
             await asyncio.to_thread(preview.side_scene, vertices, pick_region["support_z_m"], observation.world_from_cam)
-        if in_place_return or pick_only:
+        if pick_only:
             results["placement_region"] = pick_region
             results["grounded_atoms"] = [{"predicate": "holding", "args": [label]}]
             (save_dir / "placement-region.json").write_text(json.dumps(pick_region, indent=2)+"\n")
@@ -893,6 +915,20 @@ async def run_perception(
         if registered_grasps is not None else None,
         collision_labels=collision_labels,
     )
+    scene_objects = (results.get("reference_diagnostics") or {}).get("scene_objects")
+    if scene_objects is not None:
+        surface_labels = {atom["args"][1] for atom in results["grounded_atoms"] if atom["predicate"] == "on"}
+        obstacle_count = sum(
+            1
+            for label in processed_scene.object_meshes
+            if label not in surface_labels
+            and label not in (registered_grasps or ())
+            and (collision_labels is None or label in collision_labels)
+        )
+        log_tag(
+            "Perception",
+            f"주변 물체(object 참조, 점수 > {scene_objects['confidence_threshold']:.2f}): 장애물 {obstacle_count}개 검출",
+        )
     if preview is not None:
         await asyncio.to_thread(preview.obstacles, processed_scene, results,
                                 world_from_cam=observation.world_from_cam, intrinsics=frame.intrinsics,

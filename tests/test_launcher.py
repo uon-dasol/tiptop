@@ -16,25 +16,21 @@ from tiptop.run_manager import RunManager
 from tiptop.scripts.serve_perception_viewer import make_server
 
 ROOT = Path(__file__).resolve().parents[1]
-TASK = "car_leather_conditioner_bottle 집고 제자리에 놓아"
+TASK = "car_leather_conditioner_bottle 집고 박스에 놓아"
 COMMON = [
-    "--task", TASK, "--task-preset", "in_place_return",
+    "--task", TASK, "--task-preset", "home_drop",
     "--max-approach-tilt-deg", "20", "--cad-mask-min-iou", "0.6", "--min-table-clearance-m", "0.01",
     "--max-wrist-travel-deg", "90", "--min-engagement-depth-m", "0.02", "--num-particles", "32",
-    "--robot-world-tolerance-m", "0.005",
-    "--approach-distance-m", "0.15", "--lift-distance-m", "0.05", "--lift-hold-s", "1",
-    "--motion-timeout-s", "1",
     "--table-support", "declared",
 ]
 
 
 FIXED_PRESETS = dict(
     common=dict(
-        task=TASK, task_preset="in_place_return", camera_url="http://127.0.0.1:13348", hardware_profile="tiptop/config/m1013_fixed_hardware.declared.json",
+        task=TASK, task_preset="home_drop", camera_url="http://127.0.0.1:13348", hardware_profile="tiptop/config/m1013_fixed_hardware.declared.json",
         box_center_x_m=0, box_center_y_m=.31, box_bottom_z_m=0, box_size_x_m=.24, box_size_y_m=.15, box_size_z_m=.11,
         gateway_url="http://127.0.0.1:8090", max_approach_tilt_deg=20, cad_mask_min_iou=0.6, min_table_clearance_m=0.01,
-        max_wrist_travel_deg=90, min_engagement_depth_m=0.02, num_particles=32, robot_world_tolerance_m=0.005, approach_distance_m=0.15, lift_distance_m=0.05,
-        lift_hold_s=1, motion_timeout_s=1, table_support="declared", viewer=True,
+        max_wrist_travel_deg=90, min_engagement_depth_m=0.02, num_particles=32, table_support="declared", viewer=True,
     ),
     sam3_reference=dict(
         worker_socket="/tmp/tiptop-{uid}/known-task.sock", reference_scene="Lab/Uon_1F_Lab/table",
@@ -74,10 +70,23 @@ def test_sam3_execute_matches_the_hand_written_command(tmp_path):
     ]
 
 
-def test_home_drop_is_the_default_preset_and_leaves_out_the_lift_hold():
+def test_minimal_records_flag_is_sent_only_in_demo_mode_and_not_for_checks():
+    values = dict(load_presets()["presets"]["sam3_reference"])
+    assert not values["minimal_records"] and "--minimal-records" not in build_command("sam3_reference", values, "plan")
+    values["minimal_records"] = True
+    assert "--minimal-records" in build_command("sam3_reference", values, "plan")
+    assert "--minimal-records" not in build_command("sam3_reference", values, "check")
+
+
+def test_task_preset_is_only_shown_in_gemini_mode_but_still_sent():
+    field = next(field for field in FIELDS if field["key"] == "task_preset")
+    assert field["show_modes"] == ["gemini_er"]
+    assert arguments("sam3_reference", "plan")[arguments("sam3_reference", "plan").index("--task-preset") + 1] == "home_drop"
+
+
+def test_home_drop_is_the_default_preset():
     command = arguments("sam3_reference", "plan")
     assert command[command.index("--task-preset") + 1] == "home_drop"
-    assert "--lift-hold-s" not in command and "--descend-far-speed-factor" not in command
 
 
 def test_options_of_the_other_mode_and_gateway_are_left_out_of_planning_runs():
@@ -253,20 +262,31 @@ def test_object_list_follows_the_catalog_order(viewer):
     assert objects[0]["name_ko"] == "후추통" and all(item["name_ko"] for item in objects)
 
 
+def test_demo_objects_are_numbered_from_one_in_the_configured_order(viewer):
+    server = viewer(RunManager(ROOT, build=python_command("pass")))
+    objects = json.loads(request(server, "GET", "/api/objects", token=server.launcher_token)[1])["objects"]
+    demo = sorted((item for item in objects if item["demo"]), key=lambda item: item["demo"])
+    assert [item["demo"] for item in demo] == list(range(1, 17))
+    assert [item["name_ko"] for item in demo] == [
+        "후추통", "천연가죽로션", "바가지", "수세미", "머그컵", "스팸", "테크", "저장용기", "아이스팩", "의자다리커버",
+        "실", "아령모양장난감", "먼지제거펌프", "물고기모양장난감", "곰팡이제거제", "패트와매트인형"]
+
+
 def test_korean_display_names_reach_the_runner_as_class_ids():
     catalog = json.loads((ROOT / "tiptop/config/known_objects.json").read_text())["objects"]
     names = [item["name_ko"] for item in catalog]
     assert len(set(names)) == len(names)
+    assert not any(" " in name for name in names)  # the name ends at the first space of the instruction
     for item in catalog:
-        assert class_id_task(f"{item['name_ko']} 집고 제자리에 놓아") == f"{item['class_id']} 집고 제자리에 놓아"
-    assert class_id_task("3구 멀티탭 집고 제자리에 놓아") == "t_shaped_3_outlet_adapter 집고 제자리에 놓아"
-    assert class_id_task("소스통 집고 제자리에 놓아").startswith("small_squeeze_bottle ")
-    assert class_id_task("불닭소스통 집고 제자리에 놓아").startswith("samyang_buldak_sauce_bottle ")
+        assert class_id_task(f"{item['name_ko']} 집고 박스에 놓아") == f"{item['class_id']} 집고 박스에 놓아"
+    assert class_id_task("3구멀티탭 집고 박스에 놓아") == "t_shaped_3_outlet_adapter 집고 박스에 놓아"
+    assert class_id_task("소스통 집고 박스에 놓아").startswith("small_squeeze_bottle ")
+    assert class_id_task("불닭소스통 집고 박스에 놓아").startswith("samyang_buldak_sauce_bottle ")
     assert class_id_task(TASK) == TASK
     assert class_id_task("후추통을 집어") == "후추통을 집어"
-    values = dict(load_presets()["presets"]["gemini_er"], task="후추통 집고 제자리에 놓아")
+    values = dict(load_presets()["presets"]["gemini_er"], task="후추통 집고 박스에 놓아")
     assert build_command("gemini_er", values, "execute")[build_command("gemini_er", values, "execute").index("--task") + 1] == (
-        "black_pepper_shaker 집고 제자리에 놓아"
+        "black_pepper_shaker 집고 박스에 놓아"
     )
 
 
@@ -304,9 +324,8 @@ def test_num_particles_is_a_launcher_field_with_a_preset_and_must_be_an_integer(
         build_command("gemini_er", {**values, "num_particles": 32.5}, "plan")
 
 
-def test_robot_world_tolerance_is_a_launcher_field_with_the_agreed_default():
-    assert any(field["key"] == "robot_world_tolerance_m" for field in FIELDS)
-    values = dict(load_presets()["presets"]["gemini_er"])
-    assert float(values["robot_world_tolerance_m"]) == 0.005
-    command = build_command("gemini_er", {**values, "robot_world_tolerance_m": 0.01}, "plan")
-    assert command[command.index("--robot-world-tolerance-m") + 1] == "0.01"
+def test_robot_world_tolerance_and_motion_timeout_are_not_launcher_fields():
+    keys = {field["key"] for field in FIELDS}
+    assert not keys & {"robot_world_tolerance_m", "motion_timeout_s"}
+    command = build_command("gemini_er", load_presets()["presets"]["gemini_er"], "plan")
+    assert "--robot-world-tolerance-m" not in command and "--motion-timeout-s" not in command

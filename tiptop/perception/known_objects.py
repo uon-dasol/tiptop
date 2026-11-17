@@ -171,15 +171,6 @@ def _log_trial(trial, minimum_iou, label):
         log_tag("Perception", f"앞선 {trial['rank'] - 1}개 후보는 실루엣 검사에서 거부되어 {trial['rank']}번째 후보로 진행합니다", "warn")
 
 
-def require_return_in_place(grounded_atoms):
-    """The in-place runner executes only the return_in_place(target) preset."""
-    if len(grounded_atoms) != 1 or grounded_atoms[0]["predicate"] != "return_in_place" or len(grounded_atoms[0]["args"]) != 1:
-        raise ValueError(
-            f"The in-place runner supports only return_in_place(target); Gemini returned {grounded_atoms}. "
-            "Check experimental.return_in_place and the instruction."
-        )
-
-
 def registered_target(bboxes, grounded_atoms, *, catalog_path=DEFAULT_CATALOG):
     """Resolve one task target by explicit catalog aliases, never by label similarity."""
     entries = load_catalog(catalog_path)["objects"]

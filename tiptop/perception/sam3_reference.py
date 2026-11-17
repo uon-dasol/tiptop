@@ -1,11 +1,12 @@
 """Gemini-free reference detection client; no SAM3/Torch imports in this module."""
 
+import asyncio
 import io
 import json
 import logging
 import re
 import time
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 
 import aiohttp
@@ -17,6 +18,9 @@ from tiptop.object_catalog import registered_object
 _log = logging.getLogger(__name__)
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.5
+OBJECT_REFERENCE = "object"
+OBJECT_CONFIDENCE_THRESHOLD = 0.3
+DUPLICATE_OVERLAP = 0.5
 MAX_REFERENCE_TRIALS = 8
 
 
@@ -26,25 +30,13 @@ class ReferenceDetectionError(ValueError):
         self.perception_diagnostics = diagnostics
 
 
-def parse_reference_task(instruction, *, allow_pick_only=False):
-    """Resolve a catalog instruction; a preset backend may explicitly allow pick-only."""
-    pick = re.fullmatch(r"\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s*(?:을|를)?\s*집어\s*[.!]?\s*", instruction)
-    if pick and allow_pick_only:
-        registered_object(pick[1], check_files=False)
-        return pick[1]
-    match = re.fullmatch(
-        r"\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s*(?:을|를)?\s*집(?:고|어서)\s*"
-        r"(?:들어\s*올렸다가\s*)?제\s*자리(?:에|로)\s*놓(?:아\s*줘|아주세요|아|기)\s*[.!]?\s*",
-        instruction,
-    )
+def parse_reference_task(instruction):
+    """Resolve the catalog class from `<class_id> 집어`, the form task presets hand to perception."""
+    match = re.fullmatch(r"\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s*(?:을|를)?\s*집어\s*[.!]?\s*", instruction)
     if match is None:
-        expected = "Reference mode requires: <canonical_class_id>를 집고 제자리에 놓아"
-        if allow_pick_only:
-            expected += " (or <canonical_class_id> 집어)"
-        raise ValueError(expected)
-    class_id = match.group(1)
-    registered_object(class_id, check_files=False)
-    return class_id
+        raise ValueError("Reference mode requires: <canonical_class_id> 집어")
+    registered_object(match[1], check_files=False)
+    return match[1]
 
 
 def _hsv_histogram(rgb, box):
@@ -82,13 +74,8 @@ def appearance_scores(rgb, boxes, reference_image):
     return np.array([0.0 if h is None else float(np.sqrt(h * reference).sum()) for h in histograms])
 
 
-def decode_reference_result(packet, rgb_shape, class_id, *, appearance_fn=None, appearance_weight=0.0):
-    """Reject malformed results and restore the shared front-end contract.
-
-    Candidates are ranked by SAM3 score, plus `appearance_weight` times `appearance_fn(metadata, boxes)` when given.
-    Keep every usable returned instance in the scene. Ranking and MAX_REFERENCE_TRIALS apply only to
-    selecting/verifying the grasp target, never to the scene masks used for collision geometry.
-    """
+def unpack_reference_packet(packet, rgb_shape, class_id):
+    """Validate a SAM3 server reply and return its masks, boxes, scores and metadata."""
     masks = np.asarray(packet["masks"])
     boxes = np.asarray(packet["boxes_xyxy"], float)
     scores = np.asarray(packet["scores"], float)
@@ -106,13 +93,39 @@ def decode_reference_result(packet, rgb_shape, class_id, *, appearance_fn=None, 
         or metadata.get("class_id") != class_id
     ):
         raise ValueError("SAM3 returned invalid or mismatched detection data")
+    return masks, boxes, scores, metadata
+
+
+def usable_instance(box, mask, h, w):
+    x1, y1, x2, y2 = box
+    return 0 <= x1 < x2 <= w and 0 <= y1 < y2 <= h and mask.any()
+
+
+def scene_box(class_id, index, box, h, w):
+    return dict(
+        label=f"{class_id}__instance_{index}",
+        class_id=class_id,
+        instance_index=index,
+        box_2d=[box[1] / h * 1000, box[0] / w * 1000, box[3] / h * 1000, box[2] / w * 1000],
+    )
+
+
+def decode_reference_result(packet, rgb_shape, class_id, *, appearance_fn=None, appearance_weight=0.0):
+    """Reject malformed results and restore the shared front-end contract.
+
+    Candidates are ranked by SAM3 score, plus `appearance_weight` times `appearance_fn(metadata, boxes)` when given.
+    Keep every usable returned instance in the scene. Ranking and MAX_REFERENCE_TRIALS apply only to
+    selecting/verifying the grasp target, never to the scene masks used for collision geometry.
+    """
+    masks, boxes, scores, metadata = unpack_reference_packet(packet, rgb_shape, class_id)
+    n = len(scores)
+    h, w = rgb_shape[:2]
     metadata.update(candidate_scores=scores.tolist(), candidate_boxes_xyxy=boxes.tolist(), gemini_api_calls=0)
     if n == 0:
         raise ReferenceDetectionError(f"SAM3 did not detect {class_id} in the current image", metadata)
 
     def usable(i):
-        x1, y1, x2, y2 = boxes[i]
-        return 0 <= x1 < x2 <= w and 0 <= y1 < y2 <= h and masks[i].any()
+        return usable_instance(boxes[i], masks[i], h, w)
 
     ranking = scores
     if appearance_fn is not None:
@@ -127,13 +140,8 @@ def decode_reference_result(packet, rgb_shape, class_id, *, appearance_fn=None, 
     near = [int(i) for i in order if usable(i)]
     scene_indices = sorted(near)  # Keep masks and boxes in the server's instance order.
 
-    def scene_box(i):
-        return dict(
-            label=f"{class_id}__instance_{i}",
-            class_id=class_id,
-            instance_index=i,
-            box_2d=[boxes[i][1] / h * 1000, boxes[i][0] / w * 1000, boxes[i][3] / h * 1000, boxes[i][2] / w * 1000],
-        )
+    def scene_box_of(i):
+        return scene_box(class_id, i, boxes[i], h, w)
 
     candidates = [
         dict(
@@ -141,19 +149,67 @@ def decode_reference_result(packet, rgb_shape, class_id, *, appearance_fn=None, 
             score=float(scores[i]),
             ranking=float(ranking[i]),
             appearance=None if appearance_fn is None else float(appearance[i]),
-            bboxes=[scene_box(i)],
+            bboxes=[scene_box_of(i)],
         )
         for i in near[:MAX_REFERENCE_TRIALS]
     ]
     metadata.update(selected_index=index, scene_indices=scene_indices, trial_indices=[c["index"] for c in candidates])
     return dict(
-        bboxes=[scene_box(i) for i in scene_indices],
+        bboxes=[scene_box_of(i) for i in scene_indices],
         masks=masks[scene_indices],
-        grounded_atoms=[dict(predicate="on", args=[scene_box(index)["label"], "table"])],
+        grounded_atoms=[dict(predicate="on", args=[scene_box_of(index)["label"], "table"])],
         semantic_source="sam3_reference",
         reference_diagnostics=metadata,
         reference_candidates=candidates,
     )
+
+
+def decode_scene_objects(packet, rgb_shape):
+    """Usable instances of the generic `object` reference, labelled like the target-class instances."""
+    masks, boxes, scores, metadata = unpack_reference_packet(packet, rgb_shape, OBJECT_REFERENCE)
+    h, w = rgb_shape[:2]
+    indices = [i for i in range(len(scores)) if usable_instance(boxes[i], masks[i], h, w)]
+    metadata.update(candidate_scores=scores.tolist(), candidate_boxes_xyxy=boxes.tolist(),
+                    usable_scores=[float(scores[i]) for i in indices])
+    return dict(
+        bboxes=[scene_box(OBJECT_REFERENCE, i, boxes[i], h, w) for i in indices], masks=masks[indices], diagnostics=metadata
+    )
+
+
+def same_object(mask, other):
+    """Whether two masks cover the same object: one lies mostly inside the other."""
+    overlap = np.count_nonzero(mask & other)
+    return overlap >= DUPLICATE_OVERLAP * min(np.count_nonzero(mask), np.count_nonzero(other))
+
+
+def merge_scene_objects(result, scene, *, record_scores=False):
+    """Add generic instances to the scene, except those already represented by a target-class instance.
+
+    `record_scores` also keeps the SAM3 score of every usable generic instance, duplicates included.
+    """
+    known = result["masks"][:, 0]
+    added = [i for i, mask in enumerate(scene["masks"][:, 0]) if not any(same_object(mask, other) for other in known)]
+    result["bboxes"] = [*result["bboxes"], *[scene["bboxes"][i] for i in added]]
+    result["masks"] = np.concatenate([result["masks"], scene["masks"][added]])
+    result["reference_diagnostics"]["scene_objects"] = dict(
+        confidence_threshold=scene["diagnostics"].get("confidence_threshold"),
+        detected=len(scene["bboxes"]),
+        added=len(added),
+        labels=[scene["bboxes"][i]["label"] for i in added],
+    )
+    if record_scores:
+        scores = scene["diagnostics"]["usable_scores"]
+        result["reference_diagnostics"]["scene_objects"]["scores"] = {
+            box["label"]: round(score, 4) for box, score in zip(scene["bboxes"], scores)
+        }
+    return result
+
+
+def log_scene_object_scores(scene_objects):
+    """One terminal line per `object` detection, highest score first: `물체 N. score S`, marked when it duplicates a target-class instance."""
+    added = set(scene_objects["labels"])
+    for number, (label, score) in enumerate(sorted(scene_objects["scores"].items(), key=lambda item: -item[1]), 1):
+        log_tag("SAM3", f"물체 {number}. score {score:.2f}" + ("" if label in added else " · 대상 종류와 중복"), "dim")
 
 
 def log_reference_detection(class_id, metadata, requested_threshold=None):
@@ -225,12 +281,7 @@ def log_reference_failure(class_id, error):
     log_tag("SAM3", f"실패: {reason}", "fail")
 
 
-async def detect_reference(
-    session, rgb, instruction, *, server_url, reference_scene, confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
-    appearance_weight=None,
-):
-    started = time.perf_counter()
-    class_id = parse_reference_task(instruction, allow_pick_only=True)
+async def query_sam3(session, rgb, class_id, *, server_url, reference_scene, confidence_threshold, decode):
     stream = io.BytesIO()
     from tiptop.serialization import savez_fast
 
@@ -245,20 +296,47 @@ async def detect_reference(
         if response.status != 200:
             raise RuntimeError(f"SAM3 request failed ({response.status}): {(await response.text())[:1000]}")
         with np.load(io.BytesIO(await response.read()), allow_pickle=False) as packet:
-            try:
-                result = decode_reference_result(
-                    packet,
-                    rgb.shape,
-                    class_id,
-                    appearance_fn=None
-                    if appearance_weight is None
-                    else lambda metadata, boxes: appearance_scores(rgb, boxes, metadata["reference_image"]),
-                    appearance_weight=appearance_weight or 0.0,
-                )
-            except ReferenceDetectionError as error:
-                log_reference_failure(class_id, error)
-                raise
+            return decode(packet)
+
+
+async def detect_reference(
+    session, rgb, instruction, *, server_url, reference_scene, confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+    appearance_weight=None, scene_objects=False,
+):
+    """Find the grasp target with its own reference.
+
+    With `scene_objects`, the `object` reference query starts right after the target query and is returned
+    unfinished as `scene_objects_job`, so the caller can overlap it with other work and merge its result later.
+    """
+    started = time.perf_counter()
+    class_id = parse_reference_task(instruction)
+    query = partial(query_sam3, session, rgb, server_url=server_url, reference_scene=reference_scene)
+
+    def decode_target(packet):
+        try:
+            return decode_reference_result(
+                packet,
+                rgb.shape,
+                class_id,
+                appearance_fn=None
+                if appearance_weight is None
+                else lambda metadata, boxes: appearance_scores(rgb, boxes, metadata["reference_image"]),
+                appearance_weight=appearance_weight or 0.0,
+            )
+        except ReferenceDetectionError as error:
+            log_reference_failure(class_id, error)
+            raise
+
+    result = await query(class_id, confidence_threshold=confidence_threshold, decode=decode_target)
     log_reference_detection(class_id, result["reference_diagnostics"], confidence_threshold)
+    if scene_objects:
+        result["scene_objects_job"] = asyncio.create_task(
+            query(
+                OBJECT_REFERENCE,
+                confidence_threshold=OBJECT_CONFIDENCE_THRESHOLD,
+                decode=lambda packet: decode_scene_objects(packet, rgb.shape),
+            )
+        )
     _log.info("Reference detection client total took %.2fs", time.perf_counter() - started)
     return result
 

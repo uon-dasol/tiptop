@@ -1,13 +1,10 @@
-"""Return-path mathematics and success criteria, without hardware or inference."""
-from copy import deepcopy
-
+"""Pick-and-carry path mathematics, without hardware or inference."""
 import numpy as np
 import pytest
 import torch
 from curobo.types.state import JointState
 
-from tiptop.doosan.in_place import (
-    join_paths, source_region, reverse_path, stationary_boundaries, validate_in_place_plan, wrist_travel_deg)
+from tiptop.doosan.in_place import source_region, stationary_boundaries, wrist_travel_deg
 
 
 def path():
@@ -54,164 +51,11 @@ def test_wrist_travel_counts_only_j4_and_j5_excursion_from_the_start():
     assert wrist_travel_deg(JointState(position=q)) == pytest.approx(165)
 
 
-def test_reverse_changes_velocity_sign_and_preserves_the_exact_joint_path():
-    forward=stationary_boundaries(path())
-    backward=reverse_path(forward)
-    assert torch.equal(backward.position,forward.position.flip(0))
-    assert torch.equal(backward.velocity,-forward.velocity.flip(0))
-    assert torch.equal(reverse_path(backward).position,forward.position)
-
-
-def test_joined_descend_keeps_both_rests_and_drops_only_the_repeated_waypoint():
-    far=stationary_boundaries(path())
-    near=JointState(position=far.position[-1:]+torch.tensor([[0,0,0,0,0,0.],[.01,0,0,0,0,0],[.02,0,0,0,0,0]]),
-                    velocity=torch.zeros((3,6)))
-    joined=join_paths(far,near)
-    assert len(joined.position)==len(far.position)+len(near.position)-1
-    assert torch.equal(joined.position[:4],far.position) and torch.equal(joined.position[4:],near.position[1:])
-    assert torch.equal(joined.velocity[3],torch.zeros(6)) and torch.equal(joined.velocity[[0,-1]],torch.zeros((2,6)))
-    assert torch.equal(reverse_path(near).position,near.position.flip(0))
-    with pytest.raises(ValueError,match='meet'):
-        join_paths(far,JointState(position=near.position+1,velocity=near.velocity))
-
-
-def plan():
-    def leg(label,q):
-        return dict(type='trajectory',label=label,positions=np.asarray(q).tolist(),velocities=np.zeros_like(q).tolist(),dt=.5)
-    home=[0.]*6
-    grasp=[.2,.7,.2,0,0,0]
-    upper=[.2,.7,.25,0,0,0]
-    a=leg('Pick.approach',[home,upper])
-    b=leg('Pick.descend',[upper,grasp])
-    c=leg('Place.lift',[grasp,upper])
-    hold=leg('Place.hold',[upper,upper])
-    return dict(q_init=home,steps=[a,b,dict(type='gripper',label='Pick.close',action='close'),c,hold,
-        dict(type='gripper',label='Place.open',action='open'),leg('Home',[upper,home])])
-
-
-def tcp_at(q):
-    pose=np.eye(4)
-    pose[:3,3]=q[:3]
-    return pose
-
-
-def test_in_place_sequence_opens_at_lifted_pose_and_then_returns_home():
-    from tiptop.doosan.tamp import verify_gateway_contract
-    value=plan()
-    result=validate_in_place_plan(value,tcp_at,lift_distance_m=.05,position_tolerance_m=.01)
-    assert result['release_at_lifted_pose'] is True
-    assert len(verify_gateway_contract(value))==7
-
-
-@pytest.mark.parametrize('bad',['return','home','open','hold','short_lift'])
-def test_changed_return_or_hold_cannot_pass_the_plan_guard(bad):
-    value=deepcopy(plan())
-    if bad=='return': value['steps'][6]['positions'][0][0]+=.02
-    elif bad=='home': value['steps'][6]['positions'][-1][0]+=.02
-    elif bad=='open': value['steps'][5]['action']='close'
-    elif bad=='hold': value['steps'][4]['positions'][0][0]+=.01
-    else: value['steps'][3]['positions'][-1][2]=.205
-    with pytest.raises(ValueError):
-        validate_in_place_plan(value,tcp_at,lift_distance_m=.05,position_tolerance_m=.01)
-
-
 def test_source_region_needs_neither_box_nor_free_space_observations():
     region=source_region([[-.39,-1.25,-.05],[.39,1.25,-.02]],[[.1,.6,0],[.15,.65,.1]],
                          [[-.365,.47],[.365,1.225]])
-    assert region['source']=='in_place_return'
+    assert region['source']=='pick_source'
     assert region['support_z_m']==pytest.approx(0)
-
-
-def test_completed_solver_carries_its_actual_target_with_the_descend_path():
-    from types import SimpleNamespace
-    from tiptop.doosan.in_place import make_in_place_solver
-    from tiptop.doosan.known_task import KnownTaskPlanningSettings
-
-    initial = torch.eye(4)
-    initial[:3, 3] = torch.tensor([.2, .3, .4])
-    grasp = torch.eye(4)
-    grasp[0, 3] = .02
-    tool = torch.eye(4)
-    tool[2, 3] = .01
-    paths = []
-
-    def leg(*args):
-        q = torch.zeros((2, 6))
-        value = JointState(position=q, velocity=torch.zeros_like(q))
-        paths.append(value)
-        return SimpleNamespace(success=True, interpolation_dt=.02, get_interpolated_plan=lambda: value)
-
-    noop = lambda *args, **kwargs: None
-    mg = SimpleNamespace(detach_object_from_robot=noop,
-                         world_coll_checker=SimpleNamespace(enable_obstacle=noop),
-                         world_collision=SimpleNamespace(update_obstacle_pose=noop),
-                         plan_single=leg, plan_single_js=leg)
-    world = SimpleNamespace(device=torch.device('cpu'), tool_from_ee=tool,
-                            tensor_args=SimpleNamespace(to_device=lambda x: torch.tensor(x)))
-    pick = SimpleNamespace(operator=SimpleNamespace(name='Pick'), values=['object', 'grasp', None])
-    result = make_in_place_solver(KnownTaskPlanningSettings())(
-        dict(plan_skeleton=[pick]), dict(q0=torch.zeros(6), grasp=grasp), world,
-        SimpleNamespace(time_dilation_factor=.4), None, None, dict(object=initial), motion_gen=mg)
-    assert len(result) == 7
-    np.testing.assert_allclose(result[1]['grasp_target_world_from_tcp'], (initial @ grasp @ tool).numpy())
-    assert result[1]['label'] == 'Pick.descend' and 'grasp_target_world_from_tcp' not in result[0]
-    # Metadata leaves every generated joint sample untouched.
-    for value in paths:
-        assert torch.equal(value.position, torch.zeros_like(value.position))
-
-
-@pytest.mark.parametrize("overrides", [{}, dict(approach_distance_m=.05)])
-def test_every_leg_runs_at_the_fixed_speed_and_lift_preserves_time_velocity_consistency(overrides, monkeypatch):
-    from types import SimpleNamespace
-    from tiptop.doosan import in_place
-    from tiptop.doosan.in_place import make_in_place_solver
-    from tiptop.doosan.known_task import KnownTaskPlanningSettings
-
-    settings = KnownTaskPlanningSettings(**overrides)
-    calls, generated = [], []
-
-    def result(start, options, end=None):
-        q = start.position[-1:].repeat(4, 1)
-        end = q[0] + torch.tensor([.02, 0, 0, 0, 0, 0]) if end is None else end
-        q[2], q[3] = (q[0] + end) / 2, end
-        v = torch.zeros_like(q)
-        v[0, 0] = .003  # The duplicate initial positions permit the existing residue cleanup.
-        v[2, 0] = .02
-        value = JointState(position=q, velocity=v)
-        calls.append(options.time_dilation_factor)
-        generated.append(value.clone())
-        return SimpleNamespace(success=True, interpolation_dt=.02, get_interpolated_plan=lambda: value)
-
-    noop = lambda *a, **k: None
-    mg = SimpleNamespace(
-        detach_object_from_robot=noop,
-        world_coll_checker=SimpleNamespace(enable_obstacle=noop),
-        world_collision=SimpleNamespace(update_obstacle_pose=noop),
-        plan_single=lambda start, goal, options: result(start, options),
-        plan_single_js=lambda start, goal, options: result(start, options, goal.position[0]),
-    )
-    world = SimpleNamespace(device=torch.device('cpu'), tool_from_ee=torch.eye(4),
-                            tensor_args=SimpleNamespace(to_device=lambda x: torch.tensor(x)))
-    pick = SimpleNamespace(operator=SimpleNamespace(name='Pick'), values=['object', 'grasp', None])
-    steps = make_in_place_solver(settings)(
-        dict(plan_skeleton=[pick]), dict(q0=torch.zeros(6), grasp=torch.eye(4)), world,
-        SimpleNamespace(time_dilation_factor=.7), None, None, dict(object=torch.eye(4)), motion_gen=mg)
-    has_far = settings.approach_distance_m > settings.lift_distance_m
-    assert calls == [in_place.SPEED_FACTOR] * (4 if has_far else 3)
-    assert [s['label'] for s in steps] == [
-        'Pick.approach', 'Pick.descend', 'Pick.close', 'Place.lift', 'Place.hold', 'Place.open', 'Home']
-    near = generated[2 if has_far else 1]
-    lift = steps[3]
-    assert torch.equal(lift['plan'].position, near.position.flip(0))
-    assert torch.equal(steps[1]['plan'].position[-len(near.position):], near.position)
-    assert lift['dt'] == pytest.approx(.02)
-    # Same joint displacement per sample after reversing and retiming; the
-    # original descent positions, timing, and raw velocities stay untouched.
-    assert float(lift['plan'].velocity[1, 0]) * lift['dt'] == pytest.approx(-.02 * .02)
-    assert torch.count_nonzero(lift['plan'].velocity[[0, -1]]) == 0
-    assert near.velocity[0, 0] == pytest.approx(.003)
-    assert steps[4]['dt'] * len(steps[4]['plan'].position) == settings.lift_hold_s
-    assert torch.equal(steps[-1]['plan'].position[-1], torch.zeros(6))
 
 
 def run_home_drop(monkeypatch, order):
@@ -261,7 +105,7 @@ def run_home_drop(monkeypatch, order):
     world = SimpleNamespace(device=torch.device("cpu"), tool_from_ee=torch.eye(4),
                             tensor_args=SimpleNamespace(to_device=lambda x: torch.tensor(x)))
     pick = SimpleNamespace(operator=SimpleNamespace(name="Pick"), values=["object", "grasp", None])
-    steps = make_in_place_solver(KnownTaskPlanningSettings(), drop_at_home=True)(
+    steps = make_in_place_solver(KnownTaskPlanningSettings())(
         dict(plan_skeleton=[pick]), dict(q0=torch.zeros(6), grasp=torch.eye(4)), world,
         SimpleNamespace(time_dilation_factor=.7), None, None, dict(object=torch.eye(4)), motion_gen=mg)
     return steps, events, starts, constrained
@@ -279,6 +123,9 @@ def test_home_drop_descends_in_one_leg_and_lifts_with_the_object_attached(monkey
     assert torch.equal(starts["lift"], steps[1]["plan"].position[-1:])
     assert torch.equal(starts["home"], steps[3]["plan"].position[-1:])
     assert torch.equal(steps[4]["plan"].position[-1], torch.zeros(6))
+    # The completed descend carries the actual grasp target; no other leg does.
+    np.testing.assert_allclose(steps[1]["grasp_target_world_from_tcp"], np.eye(4))
+    assert "grasp_target_world_from_tcp" not in steps[0]
 
 
 def test_home_drop_replans_the_lift_without_the_object_when_the_grasp_pose_collides(monkeypatch):
@@ -289,13 +136,3 @@ def test_home_drop_replans_the_lift_without_the_object_when_the_grasp_pose_colli
     assert [s["label"] for s in steps] == LABELS
     assert constrained["lift-failed"] and not constrained["lift"]
     assert torch.equal(starts["lift"], steps[1]["plan"].position[-1:])
-
-
-def test_simulator_accepts_source_return_without_transport_but_requires_table_contact():
-    from simulation.isaac_sim.task_runtime import evaluate_pick_place
-    args=dict(baseline=[.1,.6,.04],final=[.1,.6,.04],trace=[dict(position=[.1,.6,.09])],
-              forces=[0,0,0],support=.2,region=dict(source='in_place_return',center_xy_m=[.1,.6],size_xy_m=[.1,.1]),
-              max_other_displacement=0)
-    assert evaluate_pick_place(**args)['success'] is True
-    args['support']=0
-    assert evaluate_pick_place(**args)['success'] is False

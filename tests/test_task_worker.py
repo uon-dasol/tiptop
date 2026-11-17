@@ -9,6 +9,10 @@ import pytest
 from tiptop.task_worker import TaskWorker, serve_worker, forward_if_requested
 
 
+def T(name):
+    return f'{name} 집고 박스에 놓아'
+
+
 def parse(argv):
     from tiptop.scripts.run_known_pick_place import parse_args
     return parse_args(argv)
@@ -41,13 +45,13 @@ def test_arbitrary_tasks_share_worker_but_each_request_gets_fresh_options_and_lo
         path = tmp_path/'worker.sock'
         async with await asyncio.start_unix_server(worker.handle, path=str(path)):
             for name, extra in [('C', ['--max-approach-tilt-deg','20']), ('A', ['--no-surrounding-obstacles']), ('C', [])]:
-                reader, writer = await connect(path, ['--task',name,'--perception-mode','sam3_reference',*extra])
+                reader, writer = await connect(path, ['--task',T(name),'--perception-mode','sam3_reference',*extra])
                 data, logs = await result(reader)
-                assert data['process_id'] == os.getpid() and data['task'] == name
-                assert 'TASK_OUTPUT '+name in logs
+                assert data['process_id'] == os.getpid() and data['task'] == T(name)
+                assert 'TASK_OUTPUT '+T(name) in logs
                 writer.close(); await writer.wait_closed()
             await worker.close()
-        assert calls == [('C',False,20,True),('A',False,3,False),('C',False,3,True)]
+        assert calls == [(T('C'),False,20,True),(T('A'),False,3,False),(T('C'),False,3,True)]
         assert len(prepared) == 3
     asyncio.run(check())
 
@@ -63,12 +67,12 @@ def test_busy_request_is_rejected_without_queueing_or_cancelling_active_task(tmp
         worker = TaskWorker(parse, run)
         path = tmp_path/'worker.sock'
         async with await asyncio.start_unix_server(worker.handle, path=str(path)):
-            first, one = await connect(path, ['--task','A','--perception-mode','sam3_reference'])
+            first, one = await connect(path, ['--task',T('A'),'--perception-mode','sam3_reference'])
             await asyncio.wait_for(started.wait(), timeout=5)
-            second, two = await connect(path, ['--task','B','--perception-mode','sam3_reference'])
+            second, two = await connect(path, ['--task',T('B'),'--perception-mode','sam3_reference'])
             rejected, _ = await result(second)
             assert rejected['success'] is False and 'busy' in rejected['error'] and worker.busy
-            assert calls == ['A']
+            assert calls == [T('A')]
             two.close(); await two.wait_closed()
             release.set(); assert (await result(first))[0]['success']
             one.close(); await one.wait_closed()
@@ -90,7 +94,7 @@ def test_disconnect_waits_for_cancel_cleanup_before_accepting_another_task(tmp_p
         worker = TaskWorker(parse, run)
         path = tmp_path/'worker.sock'
         async with await asyncio.start_unix_server(worker.handle, path=str(path)):
-            _, writer = await connect(path, ['--task','A','--perception-mode','sam3_reference'])
+            _, writer = await connect(path, ['--task',T('A'),'--perception-mode','sam3_reference'])
             await asyncio.wait_for(started.wait(), timeout=5)
             writer.close(); await writer.wait_closed()
             await asyncio.wait_for(cancelled.wait(), timeout=5)
@@ -106,7 +110,7 @@ def test_disconnect_waits_for_cancel_cleanup_before_accepting_another_task(tmp_p
 
 
 @pytest.mark.parametrize('argv,cwd', [(['--check'],None), (['--interactive'],None),
-    (['--max-approach-tilt-deg','91'],None), (['--task','A'],'/different/project')])
+    (['--max-approach-tilt-deg','91'],None), (['--task',T('A')],'/different/project')])
 def test_invalid_requests_never_start_a_task(tmp_path, argv, cwd):
     async def check():
         calls=[]
@@ -133,14 +137,14 @@ def test_thin_cli_skips_heavy_imports_and_does_not_retry_a_rejected_request(tmp_
         worker=TaskWorker(parse,run)
         async with await asyncio.start_unix_server(worker.handle,path=str(path)):
             proc=await asyncio.to_thread(subprocess.run,[sys.executable,'-X','importtime','-m',
-                'tiptop.scripts.run_known_pick_place','--worker-socket',str(path),'--task','B',
+                'tiptop.scripts.run_known_pick_place','--worker-socket',str(path),'--task',T('B'),
                 '--perception-mode','sam3_reference'],capture_output=True,text=True,timeout=10)
             assert proc.returncode == 1 and 'intentional failure' in proc.stdout
             assert '\033[1;31m[Result] 작업 실패' in proc.stdout
             assert '\033[1;36m[Worker Wall]' in proc.stdout
             assert '[Worker Wall]' in proc.stdout and 'torch' not in proc.stderr and 'numpy' not in proc.stderr
             await worker.close()
-        assert calls == ['B']
+        assert calls == [T('B')]
     asyncio.run(check())
 
 
@@ -158,7 +162,7 @@ def test_private_socket_ready_and_shutdown_cleanup(tmp_path, capsys):
         server=asyncio.create_task(serve_worker(path,worker,ready=prepared))
         await asyncio.wait_for(ready.wait(),timeout=5)
         assert path.stat().st_mode & 0o777 == 0o600
-        reader,writer=await connect(path,['--task','A','--perception-mode','sam3_reference'])
+        reader,writer=await connect(path,['--task',T('A'),'--perception-mode','sam3_reference'])
         assert (await result(reader))[0]['success']
         writer.close(); await writer.wait_closed()
         server.cancel(); await asyncio.gather(server,return_exceptions=True)
@@ -211,7 +215,7 @@ def test_disconnect_reaches_existing_physical_stop_and_drains_executor(tmp_path,
         worker=TaskWorker(parse,run)
         path=tmp_path/'worker.sock'
         async with await asyncio.start_unix_server(worker.handle,path=str(path)):
-            _,writer=await connect(path,['--task','A','--perception-mode','sam3_reference'])
+            _,writer=await connect(path,['--task',T('A'),'--perception-mode','sam3_reference'])
             assert await asyncio.to_thread(started.wait,5)
             writer.close(); await writer.wait_closed()
             for _ in range(100):

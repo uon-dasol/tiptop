@@ -6,6 +6,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "tiptop/config/known_objects.json"
+DEMO_OBJECTS = ROOT / "tiptop/config/demo_objects.json"
+
+
+def demo_order(path=DEMO_OBJECTS):
+    """Class ids shown in demo mode, mapped to their 1-based position in that list."""
+    return {class_id: number for number, class_id in enumerate(json.loads(Path(path).read_text()), 1)}
 
 
 def load_catalog(catalog_path=DEFAULT_CATALOG, *, asset_root=ROOT):

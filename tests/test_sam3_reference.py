@@ -15,14 +15,7 @@ from tiptop.perception_wrapper import run_visual_perception
 
 @pytest.mark.parametrize(
     "instruction",
-    [
-        "black_pepper_shaker를 집고 제자리에 놓아",
-        "`black_pepper_shaker` 집고 제 자리에 놓아.",
-        "black_pepper_shaker를 집어서 제 자리에 놓아줘",
-        "black_pepper_shaker를 집고 들어올렸다가 제자리에 놓아",
-        "black_pepper_shaker를 집고 제자리로 놓아줘",
-        "black_pepper_shaker를 집고 제자리에 놓아",
-    ],
+    ["black_pepper_shaker 집어", "`black_pepper_shaker` 집어.", "black_pepper_shaker를 집어", "black_pepper_shaker을 집어!"],
 )
 def test_explicit_reference_instruction(instruction):
     assert reference.parse_reference_task(instruction) == "black_pepper_shaker"
@@ -30,16 +23,16 @@ def test_explicit_reference_instruction(instruction):
 
 @pytest.mark.parametrize("class_id", ["spam_classic_20G_can", "grip_strengthener_30KG"])
 def test_class_id_with_uppercase_is_parsed_verbatim(class_id):
-    assert reference.parse_reference_task(f"{class_id} 집고 제자리에 놓아") == class_id
+    assert reference.parse_reference_task(f"{class_id} 집어") == class_id
 
 
 @pytest.mark.parametrize(
     "instruction",
     [
-        "not_registered를 집고 제자리에 놓아",
-        "SPAM_classic_20G_can을 집고 제자리에 놓아",
-        "후추통을 집고 제자리에 놓아",
-        "black_pepper_shaker를 집어",
+        "not_registered를 집어",
+        "SPAM_classic_20G_can을 집어",
+        "후추통을 집어",
+        "black_pepper_shaker를 집고 제자리에 놓아",
         "black_pepper_shaker를 집고 병 옆에 놓아",
         "black_pepper_shaker를 집고 상자에 놓아",
         "black_pepper_shaker를 집고 빈곳에 놓아",
@@ -48,10 +41,6 @@ def test_class_id_with_uppercase_is_parsed_verbatim(class_id):
 def test_unsupported_instruction_fails_without_guessing(instruction):
     with pytest.raises(ValueError):
         reference.parse_reference_task(instruction)
-
-
-def test_fixed_destination_backend_can_explicitly_request_pick_only():
-    assert reference.parse_reference_task("black_pepper_shaker 집어", allow_pick_only=True) == "black_pepper_shaker"
 
 
 def packet(h=4, w=6):
@@ -134,7 +123,7 @@ def test_reference_frontend_uses_each_current_image_without_gemini_or_sam2(monke
                 Session(),
                 frame,
                 np.eye(4),
-                "black_pepper_shaker를 집고 제자리에 놓아",
+                "black_pepper_shaker 집어",
                 perception_mode="sam3_reference",
                 sam3_confidence_threshold=threshold,
             )
@@ -444,3 +433,116 @@ def test_terminal_log_reports_the_appearance_ranking_and_whether_it_changed_the_
     off = reference.decode_reference_result(value, (4, 6, 3), "black_pepper_shaker")
     reference.log_reference_detection("black_pepper_shaker", off["reference_diagnostics"])
     assert "외형" not in capsys.readouterr().out
+
+
+def object_packet(h=4, w=6):
+    masks = np.zeros((4, 1, h, w), bool)
+    masks[0, 0, :2, :3] = True  # the same pixels as the first target-class instance
+    masks[1, 0, 2, 3:5] = True  # a fragment inside the second target-class instance
+    masks[2, 0, :2, 4:] = True  # a separate object
+    return dict(
+        masks=masks,
+        scores=np.array([0.7, 0.4, 0.5, 0.9]),
+        boxes_xyxy=np.array([[0, 0, 3, 2], [3, 2, 5, 3], [4, 0, 6, 2], [0, 0, 1, 1]]),  # the last mask is empty
+        metadata=np.array(json.dumps(dict(class_id="object", confidence_threshold=0.3))),
+    )
+
+
+def test_scene_objects_keep_only_usable_instances_with_generic_labels():
+    scene = reference.decode_scene_objects(object_packet(), (4, 6, 3))
+    assert [b["label"] for b in scene["bboxes"]] == [f"object__instance_{i}" for i in range(3)]
+    assert {b["class_id"] for b in scene["bboxes"]} == {"object"} and len(scene["masks"]) == 3
+
+
+def test_scene_objects_exclude_instances_already_found_by_the_target_class():
+    result = reference.decode_reference_result(packet(), (4, 6, 3), "black_pepper_shaker")
+    reference.merge_scene_objects(result, reference.decode_scene_objects(object_packet(), (4, 6, 3)))
+    assert [b["label"] for b in result["bboxes"]] == [
+        "black_pepper_shaker__instance_0", "black_pepper_shaker__instance_1", "object__instance_2"]
+    assert len(result["masks"]) == 3
+    assert result["reference_diagnostics"]["scene_objects"] == dict(
+        confidence_threshold=0.3, detected=3, added=1, labels=["object__instance_2"])
+    assert result["grounded_atoms"] == [dict(predicate="on", args=["black_pepper_shaker__instance_1", "table"])]
+
+
+@pytest.mark.parametrize("scene_objects, classes, thresholds", [
+    (False, ["black_pepper_shaker"], [0.5]),
+    (True, ["black_pepper_shaker", "object"], [0.5, reference.OBJECT_CONFIDENCE_THRESHOLD]),
+])
+def test_scene_objects_are_requested_only_when_asked(scene_objects, classes, thresholds):
+    sent = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, value):
+            self.value = value
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def read(self):
+            stream = io.BytesIO()
+            np.savez_compressed(stream, **self.value)
+            return stream.getvalue()
+
+    class Session:
+        def post(self, url, *, data, timeout):
+            with np.load(io.BytesIO(data), allow_pickle=False) as request:
+                sent.append((str(request["class_id"]), float(request["confidence_threshold"])))
+            return Response(object_packet() if sent[-1][0] == "object" else packet())
+
+    async def detect():
+        result = await reference.detect_reference(
+            Session(), np.zeros((4, 6, 3), np.uint8), "black_pepper_shaker 집어", server_url="http://sam3",
+            reference_scene="Lab/table", scene_objects=scene_objects)
+        job = result.pop("scene_objects_job", None)
+        assert (job is not None) == scene_objects
+        assert len(result["bboxes"]) == 2  # the object query is still running, nothing merged yet
+        if job is not None:
+            reference.merge_scene_objects(result, await job)
+        return result
+
+    result = asyncio.run(detect())
+    assert sent == list(zip(classes, thresholds))
+    assert len(result["bboxes"]) == (3 if scene_objects else 2)
+
+
+def test_attached_scene_objects_extend_masks_and_object_points():
+    from tiptop.perception_wrapper import attach_scene_objects
+
+    result = reference.decode_reference_result(packet(), (4, 6, 3), "black_pepper_shaker")
+    scene = reference.decode_scene_objects(object_packet(), (4, 6, 3))
+    depth = dict(valid_depth_mask=np.ones((4, 6), bool), xyz_map=np.zeros((4, 6, 3)), rgb_map=np.zeros((4, 6, 3)))
+    result.update(depth, objects={})
+
+    async def run():
+        job = asyncio.create_task(asyncio.sleep(0, scene))
+        return await attach_scene_objects(result, job)
+
+    merged = asyncio.run(run())
+    labels = [box["label"] for box in merged["bboxes"]]
+    assert len(labels) == len(merged["masks"]) == 3 and set(merged["objects"]) == set(labels[2:])
+
+
+def test_scene_object_scores_are_recorded_only_when_asked():
+    scene = reference.decode_scene_objects(object_packet(), (4, 6, 3))
+
+    def merged(**options):
+        target = reference.decode_reference_result(packet(), (4, 6, 3), "black_pepper_shaker")
+        return reference.merge_scene_objects(target, scene, **options)["reference_diagnostics"]["scene_objects"]
+
+    assert "scores" not in merged()
+    scores = merged(record_scores=True)["scores"]
+    assert list(scores) == [f"object__instance_{i}" for i in range(3)]  # target-class duplicates included
+    assert scores["object__instance_2"] == 0.5
+
+
+def test_scene_object_scores_are_logged_one_per_line(capsys):
+    reference.log_scene_object_scores(dict(labels=["object__instance_2"], scores={
+        "object__instance_0": 0.5, "object__instance_2": 0.7}))
+    lines = [line.split("\x1b[0m ", 1)[1].replace("\x1b[90m", "").replace("\x1b[0m", "") for line in capsys.readouterr().out.splitlines()]
+    assert lines == ["물체 1. score 0.70", "물체 2. score 0.50 · 대상 종류와 중복"]

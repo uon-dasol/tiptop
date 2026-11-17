@@ -1,25 +1,7 @@
 {
-  "in_place_return": {
-    "label": "제자리 놓기",
-    "action": "집고 제자리에 놓아",
-    "release_height_m": 0.0
-  },
-  "fixed_box": {
-    "label": "고정 박스에 놓기",
-    "action": "집고 박스에 놓아",
-    "present": true,
-    "release_height_m": 0.0,
-    "box_center_x_m": 0.0,
-    "box_center_y_m": 0.35,
-    "box_bottom_z_m": 0.0,
-    "box_size_x_m": 0.35,
-    "box_size_y_m": 0.2,
-    "box_size_z_m": 0.15,
-    "position_source": "base_link metres; 0.20m-deep box spans Y=0.250..0.450m, outside the red tape strip (Y=0.452..0.477)"
-  },
   "home_drop": {
-    "label": "초기 위치에서 떨구기",
-    "action": "집고 초기 위치에서 떨어뜨려",
+    "label": "박스에 놓기",
+    "action": "집고 박스에 놓아",
     "release_height_m": 0.0,
     "box_wall_thickness_m": 0.005
   },

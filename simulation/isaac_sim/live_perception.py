@@ -515,9 +515,7 @@ try:
                 armatures=client.robot.get_dof_armatures().numpy()[0].tolist(),
                 baseline_position=baseline.tolist(), calls=client.calls, gemini_api_calls=0,
                 finished=False, unintended_drop_detected=False,
-                criterion=('lift > 30 mm, returned to source, released on table, no unintended drop'
-                           if plan.get('task_mode') == 'in_place_return'
-                           else 'lift > 30 mm, moved > 100 mm, released in observed region, table support, no unintended drop or non-target displacement; any final orientation'))
+                criterion='lift > 30 mm, moved > 100 mm, released in observed region, table support, no unintended drop or non-target displacement; any final orientation')
             try:
                 execute_cutamp_plan(plan['steps'], client)
                 for _ in range(480):

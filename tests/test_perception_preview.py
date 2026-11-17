@@ -68,7 +68,7 @@ def test_final_sweep_boxes_reconcile_pose_not_score_and_skip_ambiguous_sources(t
     preview.update('planning', dict(supplied_candidate_ids=[0, 1]))
     preview.publish_plan(completed_plan(), np.eye(4), np.diag([100, 100, 1]))
     final = preview.state['final_grasp']
-    assert len(final['outlines']) == 5
+    assert len(final['outlines']) == 3  # only the finger tips are published
     assert preview.state['db_source']['path'] == str(db)
     assert len(preview.state['grasps'][0]['grasp_boxes']) == 3
     if ambiguous:
@@ -192,11 +192,9 @@ def test_cad_projection_contains_three_fingers_and_respects_the_model_tcp(tmp_pa
     tcp[2, 3] = 1
     result = project_grasps([tcp], np.eye(4), np.diag([100, 100, 1]), [[0, 0, -.1, .01]],
                             [7], [.8], tool_parts=list(original.items()))
-    assert len(result[0]['outlines']) == 5
-    assert all(len(part['points']) >= 3 for part in result[0]['outlines'])
+    assert len(result[0]['outlines']) == 3 and not any('points' in part for part in result[0]['outlines'])
     tips = {part['part']: part['tip'] for part in result[0]['outlines'] if 'finger' in part['part']}
     assert set(tips) == {f'gripper_finger{i}' for i in (1, 2, 3)}
-    assert not any('tip' in part for part in result[0]['outlines'] if 'finger' not in part['part'])
     for name, tip in tips.items():
         vertices = original[name]
         expected = vertices[vertices[:, 2] >= vertices[:, 2].max() - .015].mean(axis=0)
@@ -289,7 +287,7 @@ def test_side_view_keeps_metric_heights_and_uses_the_final_commanded_gripper(tmp
     side = final['side']
     assert side['axes'][0][1] == pytest.approx(final['world_from_tcp'][2][3]-.03)
     assert side['axes'][0][0] == pytest.approx(.15-final['world_from_tcp'][0][3])
-    assert len(side['outlines']) == 5
+    assert len(side['outlines']) == 3
     tcp = np.asarray(final['world_from_tcp'])
     for name, vertices in gripper_mesh_parts(str(preview.urdf_path)):
         if 'finger' in name:
@@ -332,6 +330,9 @@ def test_sam3_target_moves_to_the_current_candidate_without_changing_scene_layer
     state = json.loads((preview.directory / "state.json").read_text())
     assert state["target_label"] == boxes[1]["label"]
     assert state["boxes"] == boxes and state["images"]["mask"] == mask_file
+    assert state["target_final"] is False  # candidates are still being verified
+    preview.update("target_final", {})
+    assert json.loads((preview.directory / "state.json").read_text())["target_final"] is True
 
 
 def test_old_worker_snapshots_use_the_saved_selected_instance_not_the_first_box(tmp_path):

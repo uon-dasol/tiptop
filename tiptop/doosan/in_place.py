@@ -1,4 +1,4 @@
-"""Pick, lift and release above the observed source; no placement-region search."""
+"""Pick, lift and carry home; no placement-region search."""
 
 import logging
 import time
@@ -15,27 +15,21 @@ def source_region(table_bounds, vertices, bounds_xy=None):
     if bounds_xy is not None:
         restrict_pick_place_area(table, vertices, bounds_xy)
     low, high = vertices.min(0), vertices.max(0)
-    return dict(source="in_place_return", support_z_m=table_support_z(table[1, 2]),
+    return dict(source="pick_source", support_z_m=table_support_z(table[1, 2]),
                 initial_cad_bounds_xyz_m=[low.tolist(), high.tolist()],
                 center_xy_m=((low+high)/2)[:2].tolist(),
                 size_xy_m=(high-low+.04)[:2].tolist(), return_xy_tolerance_m=.02)
 
 
-def reverse_path(path):
-    """Reverse positions AND velocity signs, preserving every sample and timing."""
-    from curobo.types.state import JointState
-
-    return JointState(position=path.position.flip(0).clone(), velocity=-path.velocity.flip(0).clone())
-
-
 SPEED_FACTOR = 1.0  # every planned leg runs at the planner's full speed
+HOME_DROP_OFFSET_M = 0.05  # cuTAMP's fixed approach and retract offset, used by `home_drop`
 
 
 def stationary_boundaries(path, *, terminal_velocity_tolerance_rad_s=5e-3):
     """Remove only boundary finite-difference residues at an initial hold.
 
     cuRobo can report a small initial velocity despite two coincident initial
-    positions. A reversed path needs that held endpoint to finish at rest too.
+    positions.
     All positions, interior velocities and sample times are preserved.
     """
     result = path.clone()
@@ -52,17 +46,6 @@ def stationary_boundaries(path, *, terminal_velocity_tolerance_rad_s=5e-3):
             raise ValueError("Nonstationary initial trajectory boundary")
     result.velocity[[0, -1]] = 0
     return result
-
-
-def join_paths(first, second):
-    """Join two rest-to-rest paths that meet at one waypoint."""
-    import torch
-    from curobo.types.state import JointState
-
-    if not torch.allclose(first.position[-1], second.position[0], atol=1e-6, rtol=0):
-        raise ValueError("Paths to join do not meet")
-    return JointState(position=torch.cat([first.position, second.position[1:]]),
-                      velocity=torch.cat([first.velocity, second.velocity[1:]]))
 
 
 def wrist_travel_deg(path):
@@ -99,19 +82,14 @@ def attach_object_at_grasp(mg, world, obj, world_from_obj, grasp_state):
         obstacle.get_bounding_spheres = original
 
 
-def make_in_place_solver(settings, *, drop_at_home=False):
-    """Use cuTAMP's grasp, lift back along the descend path, then release and return home.
+def make_in_place_solver(settings):
+    """Plan pick, lift and the carry home as cuTAMP's own Pick and Place do, then open at home.
 
-    The approach stops `approach_distance_m` behind the grasp and the descend passes through a stop
-    `lift_distance_m` behind it, so the last stretch is the same path the lift reverses. The lift is not
-    collision-checked with the object attached. Home starts at the lifted joints. Nothing is sent to
-    any execution backend here.
-
-    With `drop_at_home` the object stays in the gripper and the legs follow cuTAMP's own Pick and Place: the
-    approach stops `approach_distance_m` behind the grasp, one straight descend reaches it, and the object is
-    attached at the grasp. The lift is a new straight plan `lift_distance_m` back, checked with the object; if the
+    The approach stops `HOME_DROP_OFFSET_M` behind the grasp, one straight descend reaches it, and the object is
+    attached at the grasp. The lift is a new straight plan `HOME_DROP_OFFSET_M` back, checked with the object; if the
     grasp pose collides as a start state the lift is planned once without the object, as cuTAMP's Place does.
-    Home is then planned with the object and the gripper opens at the captured home.
+    Home is then planned with the object and the gripper opens at the captured home. Nothing is sent to any
+    execution backend here.
     """
     def solve(plan_info, best_particle, world, config, timer, visualizer,
               obj_to_initial_pose, timeline="curobo", motion_gen=None):
@@ -129,7 +107,7 @@ def make_in_place_solver(settings, *, drop_at_home=False):
         picks = [op for op in plan_info["plan_skeleton"] if op.operator.name == "Pick"]
         if len(picks) != 1 or any(op.operator.name not in {"MoveFree", "Pick"}
                                   for op in plan_info["plan_skeleton"]):
-            raise MotionPlanningError("In-place return requires one Pick and no Place or transport operator")
+            raise MotionPlanningError("Home drop requires one Pick and no Place or transport operator")
         obj, grasp, _ = picks[0].values
         mg = motion_gen
         mg.detach_object_from_robot("attached_object")
@@ -174,40 +152,23 @@ def make_in_place_solver(settings, *, drop_at_home=False):
             _log.info("%s planning took %.2fs", label, time.perf_counter() - started)
             return dict(type="trajectory", label=label, plan=path, dt=float(result.interpolation_dt))
 
-        approach = leg(q0, behind(settings.approach_distance_m), plan_config, "Pick.approach")
-        above = approach
-        if not drop_at_home and settings.approach_distance_m > settings.lift_distance_m:
-            above = leg(JointState.from_position(approach["plan"].position[-1:]), behind(settings.lift_distance_m),
-                        straight, "Pick.descend far")
-        final = leg(JointState.from_position(above["plan"].position[-1:]), target, straight, "Pick.descend")
-        descend = final
-        if above is not approach:
-            if above["dt"] != final["dt"]:
-                raise MotionPlanningError("Pick.descend: legs have different sample times")
-            descend = dict(final, plan=join_paths(above["plan"], final["plan"]))
-            travel = wrist_travel_deg(descend["plan"])
-            if travel > settings.max_wrist_travel_deg:
-                raise MotionPlanningError(
-                    f"Pick.descend: J4/J5 travel {travel:.0f} deg exceeds {settings.max_wrist_travel_deg:g} deg"
-                )
-        if drop_at_home:
-            grasp_position = descend["plan"].position[-1:]
-            attach_object_at_grasp(mg, world, obj, obj_to_initial_pose[obj], JointState.from_position(grasp_position))
+        approach = leg(q0, behind(HOME_DROP_OFFSET_M), plan_config, "Pick.approach")
+        descend = leg(JointState.from_position(approach["plan"].position[-1:]), target, straight, "Pick.descend")
+        grasp_position = descend["plan"].position[-1:]
+        attach_object_at_grasp(mg, world, obj, obj_to_initial_pose[obj], JointState.from_position(grasp_position))
+        try:
+            lift = leg(JointState.from_position(grasp_position.clone()), behind(HOME_DROP_OFFSET_M),
+                       straight, "Place.lift")
+        except StartStateCollision:
+            # The picked object rests on its support, so only this lift is planned without it.
+            kinematics_config = mg.kinematics.kinematics_config
+            object_spheres = kinematics_config.get_link_spheres("attached_object").clone()
+            kinematics_config.detach_object("attached_object")
             try:
-                lift = leg(JointState.from_position(grasp_position.clone()), behind(settings.lift_distance_m),
-                           straight, "Place.lift")
-            except StartStateCollision:
-                # The picked object rests on its support, so only this lift is planned without it.
-                kinematics_config = mg.kinematics.kinematics_config
-                object_spheres = kinematics_config.get_link_spheres("attached_object").clone()
-                kinematics_config.detach_object("attached_object")
-                try:
-                    lift = leg(JointState.from_position(grasp_position.clone()), behind(settings.lift_distance_m),
-                               plan_config, "Place.lift")
-                finally:
-                    kinematics_config.attach_object(sphere_tensor=object_spheres, link_name="attached_object")
-        else:
-            lift = dict(type="trajectory", label="Place.lift", plan=reverse_path(final["plan"]), dt=final["dt"])
+                lift = leg(JointState.from_position(grasp_position.clone()), behind(HOME_DROP_OFFSET_M),
+                           plan_config, "Place.lift")
+            finally:
+                kinematics_config.attach_object(sphere_tensor=object_spheres, link_name="attached_object")
 
         home = leg(JointState.from_position(lift["plan"].position[-1:]),
                    JointState.from_position(home_position.clone()),
@@ -217,39 +178,7 @@ def make_in_place_solver(settings, *, drop_at_home=False):
         descend["grasp_target_world_from_tcp"] = target.detach().cpu().numpy().tolist()
         close = dict(type="gripper", label="Pick.close", action="close")
         release = dict(type="gripper", label="Place.open", action="open")
-        if drop_at_home:
-            mg.detach_object_from_robot("attached_object")
-            return [approach, descend, close, lift, home, release]
-        lifted = lift["plan"].position[-1:].repeat(2, 1)
-        hold = dict(type="trajectory", label="Place.hold",
-                    plan=JointState(position=lifted, velocity=torch.zeros_like(lifted)),
-                    dt=settings.lift_hold_s/2)
-        return [approach, descend, close, lift, hold, release, home]
+        mg.detach_object_from_robot("attached_object")
+        return [approach, descend, close, lift, home, release]
 
     return solve
-
-
-def validate_in_place_plan(plan, tcp_at, *, lift_distance_m, position_tolerance_m):
-    steps = plan["steps"]
-    expected = ["Pick.approach", "Pick.descend", "Pick.close", "Place.lift", "Place.hold",
-                "Place.open", "Home"]
-    if [step["label"] for step in steps] != expected:
-        raise ValueError("In-place plan has an unexpected action sequence")
-    if steps[2].get("action") != "close" or steps[5].get("action") != "open":
-        raise ValueError("In-place plan must close before lift and open at the lifted hold")
-    grasp_q = np.asarray(steps[1]["positions"][-1])
-    release_q = np.asarray(steps[4]["positions"][-1])
-    if not np.allclose(steps[6]["positions"][0], release_q, atol=1e-7, rtol=0):
-        raise ValueError("Home must start at the lifted release joints")
-    if not np.allclose(steps[-1]["positions"][-1], plan["q_init"], atol=1e-7, rtol=0):
-        raise ValueError("In-place plan must finish at its captured home")
-    if (not np.allclose(steps[4]["positions"], steps[3]["positions"][-1], atol=1e-7, rtol=0)
-            or np.any(np.abs(steps[4]["velocities"]) > 1e-7)):
-        raise ValueError("The lifted hold must remain stationary")
-    grasp = tcp_at(grasp_q)
-    lifted = tcp_at(steps[3]["positions"][-1])
-    delta = lifted[:3, 3]-grasp[:3, 3]
-    if delta[2] < lift_distance_m-position_tolerance_m-.002:
-        raise ValueError("Planned lift does not raise the TCP sufficiently")
-    return dict(tcp_lift_xyz_m=delta.tolist(), release_at_lifted_pose=True,
-                returns_to_home=True)

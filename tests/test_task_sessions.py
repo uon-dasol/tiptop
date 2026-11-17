@@ -285,34 +285,14 @@ def test_cli_passes_requested_planning_limits_before_running_task(monkeypatch):
             "run_known_pick_place",
             "--perception-mode",
             "sam3_reference",
-            "--motion-timeout-s",
-            "2",
             "--motion-position-tolerance-m",
             "0.005",
             "--motion-rotation-tolerance",
             "0.05",
-            "--approach-distance-m",
-            "0.2",
-            "--lift-distance-m",
-            "0.06",
-            "--lift-hold-s",
-            "1.5",
         ],
     )
     runner.main()
     settings = captured[0]
-    assert settings.motion_timeout_s == 2
+    assert settings.motion_timeout_s == 1
     assert settings.motion_position_tolerance_m == 0.005
     assert settings.motion_rotation_tolerance == 0.05
-    assert settings.approach_distance_m == .2
-    assert settings.lift_distance_m == .06
-    assert settings.lift_hold_s == 1.5
-    # Invalid height budgets fail before entering perception or planning.
-    monkeypatch.setattr(sys, "argv", ["run_known_pick_place", "--lift-distance-m", "0.003"])
-    with pytest.raises(SystemExit) as error:
-        runner.main()
-    assert error.value.code == 2 and len(captured) == 1
-    monkeypatch.setattr(sys, "argv", ["run_known_pick_place", "--approach-distance-m", "0.04"])
-    with pytest.raises(SystemExit) as error:
-        runner.main()
-    assert error.value.code == 2 and len(captured) == 1

@@ -158,12 +158,6 @@ def test_all_reference_masks_become_hulls_with_only_the_selected_target_movable(
         dict(motion_timeout_s=float("nan")),
         dict(motion_position_tolerance_m=-0.01),
         dict(motion_rotation_tolerance=float("inf")),
-        dict(approach_distance_m=0),
-        dict(approach_distance_m=.04),
-        dict(lift_distance_m=0),
-        dict(lift_distance_m=.005),
-        dict(lift_hold_s=0),
-        dict(lift_hold_s=float("nan")),
         dict(max_wrist_travel_deg=0),
         dict(max_wrist_travel_deg=float("inf")),
         dict(min_table_clearance_m=0),
@@ -261,14 +255,13 @@ def test_candidate_stage_line_reports_counts_drop_time_and_colour(capsys):
     assert "100 → 20 (−80)" in yellow and "\033[1;33m[IK]" in yellow
 
 
-def test_robot_world_tolerance_defaults_to_5_mm_and_reaches_the_planning_settings():
+def test_robot_world_tolerance_is_fixed_at_10_mm_and_reaches_the_planning_settings():
     from tiptop.doosan.known_task import KnownTaskPlanningSettings
     from tiptop.scripts.run_known_pick_place import parse_args
 
-    assert KnownTaskPlanningSettings().robot_world_tolerance_m == pytest.approx(0.005)
+    assert KnownTaskPlanningSettings().robot_world_tolerance_m == pytest.approx(0.01)
     base = ["--task", "black_pepper_shaker 집고 제자리에 놓아", "--camera-url", "http://127.0.0.1:13348"]
-    assert parse_args(base).planning_settings.robot_world_tolerance_m == pytest.approx(0.005)
-    assert parse_args([*base, "--robot-world-tolerance-m", "0.001"]).planning_settings.robot_world_tolerance_m == 0.001
+    assert parse_args(base).planning_settings.robot_world_tolerance_m == pytest.approx(0.01)
 
 
 def test_planning_applies_the_tolerance_to_robot_to_world_only_and_never_mutates_the_upstream_table(monkeypatch):

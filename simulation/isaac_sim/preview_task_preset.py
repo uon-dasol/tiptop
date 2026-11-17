@@ -49,7 +49,7 @@ def main():
         from m1013_uon import ARM, GRIPPER, build_stage, model_fk
         from tiptop.task_presets import TaskSettings
 
-        settings = TaskSettings(preset="fixed_box")
+        settings = TaskSettings(preset="home_drop")
         stage, _, robot_report = build_stage(output, align_spinner=True)
         environment = attach_lab_environment(stage)
         camera = IsaacLabCamera(stage)

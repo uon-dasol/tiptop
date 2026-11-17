@@ -102,11 +102,6 @@ def evaluate_pick_place(
         other_objects_undisturbed=max_other_displacement <= 0.005,
         no_unintended_drop=not unintended_drop,
     )
-    if region.get("source") == "in_place_return":
-        checks.pop("transported")
-        in_region = bool(np.all(np.abs(final[:2]-baseline[:2]) <= region.get("return_xy_tolerance_m", .02)))
-        checks["inside_selected_region"] = in_region
-        checks["returned_to_source_height"] = bool(abs(final[2]-baseline[2]) <= .02)
     success = all(checks.values())
     return dict(
         success=success,

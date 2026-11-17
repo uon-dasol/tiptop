@@ -18,13 +18,15 @@ TABLE_SUPPORT = ("ransac-cad", "ransac-mask", "declared")
 
 _SAM3_ONLY = ["sam3_reference"]
 # hidden fields have no input box; their preset value still goes into the command.
+# show_modes limits where a field is displayed; its value still goes into every mode's command.
 FIELDS = (
     dict(key="task_preset", label="작업 프리셋", type="select", options=list(TASK_PRESETS),
-         option_labels={key: value["label"] for key, value in TASK_PRESETS.items()}, modes=None),
+         option_labels={key: value["label"] for key, value in TASK_PRESETS.items()}, modes=None,
+         show_modes=["gemini_er"]),
     dict(key="task", label="지시문", type="text", modes=None),
     dict(key="release_height_m", label="목적지 상단에서 놓는 높이 (m)", type="number", modes=None,
-         tasks=["fixed_box", "perceived_surface"], hidden=True),
-    *[dict(key=key, label=label, type="number", modes=None, tasks=["fixed_box", "home_drop"], hidden=True) for key, label in (
+         tasks=["perceived_surface"], hidden=True),
+    *[dict(key=key, label=label, type="number", modes=None, tasks=["home_drop"], hidden=True) for key, label in (
         ("box_center_x_m", "박스 중심 X (m)"), ("box_center_y_m", "박스 중심 Y (m)"),
         ("box_bottom_z_m", "박스 바닥 Z (m)"), ("box_size_x_m", "박스 X 길이 (m)"),
         ("box_size_y_m", "박스 Y 길이 (m)"), ("box_size_z_m", "박스 높이 (m)"),
@@ -40,17 +42,13 @@ FIELDS = (
     dict(key="max_wrist_travel_deg", label="최대 손목 이동 (deg)", type="number", modes=None),
     dict(key="min_engagement_depth_m", label="최소 파지 깊이 (m)", type="number", modes=None),
     dict(key="num_particles", label="후보 파지 수 (= 입자 수 상한)", type="number", modes=None),
-    dict(key="robot_world_tolerance_m", label="충돌 허용치 (m, 겹침 합)", type="number", modes=None),
-    dict(key="approach_distance_m", label="접근 거리 (m, 상승 거리 이상)", type="number", modes=None, tasks=["in_place_return", "home_drop"]),
-    dict(key="lift_distance_m", label="상승 거리 (m)", type="number", modes=None, tasks=["in_place_return", "home_drop"]),
-    dict(key="lift_hold_s", label="상승 후 대기 (s)", type="number", modes=None, tasks=["in_place_return"]),
-    dict(key="motion_timeout_s", label="모션 탐색 시간 (s)", type="number", modes=None),
     dict(key="sam3_confidence_threshold", label="SAM3 신뢰도 임계값 (초과한 후보만)", type="number", modes=_SAM3_ONLY),
     dict(key="appearance_ranking", label="외형 유사도로 후보 순위 보정", type="checkbox", modes=_SAM3_ONLY),
     dict(key="appearance_weight", label="외형 유사도 가중치 (SAM3 점수 + 가중치 × 유사도)", type="number", modes=_SAM3_ONLY),
     dict(key="table_support", label="테이블 높이 방식", type="select", options=list(TABLE_SUPPORT), modes=None),
-    dict(key="viewer", label="뷰어 표시", type="checkbox", modes=None),
+    dict(key="viewer", label="뷰어 표시", type="checkbox", modes=None, hidden=True),
     dict(key="surrounding_obstacles", label="주변 물체 장애물 반영", type="checkbox", modes=None),
+    dict(key="minimal_records", label="데모 모드 (기록 최소화)", type="checkbox", modes=None),
 )
 _NUMBERS = tuple((field["key"], field["modes"], field.get("tasks")) for field in FIELDS if field["type"] == "number")
 _INTEGERS = ("num_particles",)
@@ -64,7 +62,7 @@ def expand(value):
 
 def load_presets(path: Path = PRESETS_PATH) -> dict:
     document = json.loads(Path(path).read_text())
-    presets = {mode: {"surrounding_obstacles": True, **task_defaults(), **document["common"], **document[mode]} for mode in MODES}
+    presets = {mode: {"surrounding_obstacles": True, "minimal_records": False, **task_defaults(), **document["common"], **document[mode]} for mode in MODES}
     presets = {mode: {key: expand(value) for key, value in values.items()} for mode, values in presets.items()}
     for values in presets.values():
         registered = TaskSettings(preset=values["task_preset"])
@@ -173,6 +171,8 @@ def build_command(mode: str, values: dict, kind: str) -> list[str]:
         command += ["--check"]
     if values.get("viewer") and kind != "check":
         command += ["--viewer"]
+    if values.get("minimal_records") and kind != "check":
+        command += ["--minimal-records"]
     return command
 
 

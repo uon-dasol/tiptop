@@ -12,6 +12,7 @@ from tiptop.perception.cameras import (
     DepthEstimator,
     Frame,
 )
+from tiptop.perception.sam3_reference import merge_scene_objects
 from tiptop.perception.utils import depth_to_xyz, get_o3d_pcd
 
 _log = logging.getLogger(__name__)
@@ -166,6 +167,16 @@ def object_points(detection, depth):
     return objects
 
 
+async def attach_scene_objects(results, scene_objects_job, *, record_scores=False):
+    """Wait for the `object` query and add its new instances to the detections, masks and object points."""
+    scene = await scene_objects_job
+    count = len(results["bboxes"])
+    merge_scene_objects(results, scene, record_scores=record_scores)
+    added = dict(bboxes=results["bboxes"][count:], masks=results["masks"][count:])
+    results["objects"] = {**results["objects"], **object_points(added, results)}
+    return results
+
+
 def select_reference_candidate(results, candidate):
     """Select another grasp target while retaining every instance's collision mask."""
     label = candidate["bboxes"][0]["label"]
@@ -191,6 +202,7 @@ async def run_visual_perception(
     reference_scene=None,
     sam3_confidence_threshold=None,
     appearance_weight=None,
+    scene_objects=False,
     on_update=None,
 ) -> dict:
     """One RGB/depth observation through the selected detector and common geometry.
@@ -216,6 +228,7 @@ async def run_visual_perception(
             confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD
             if sam3_confidence_threshold is None else sam3_confidence_threshold,
             appearance_weight=appearance_weight,
+            scene_objects=scene_objects,
         )
     elif active_task is not None:
         if client is not None or active_task["instruction"] != task_instruction:

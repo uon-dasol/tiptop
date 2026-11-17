@@ -139,7 +139,6 @@ async def run(args):
         raise ValueError("Known-DB baseline uses the existing observed hull path; disable RecGen")
     mode = getattr(args, "perception_mode", None) or cfg.perception.get("mode", "gemini_er")
     if mode == "gemini_er":
-        cfg.experimental.return_in_place = task_settings.preset == "in_place_return"
         cfg.experimental.pick_place_next_to = False
         sam2_client()
     elif mode != "sam3_reference":
@@ -153,7 +152,7 @@ async def run(args):
 
             if args.active_task:
                 raise ValueError("Reference mode requires a fresh detection, not --active-task")
-            class_id = parse_reference_task(perception_instruction, allow_pick_only=task_settings.pick_only)
+            class_id = parse_reference_task(perception_instruction)
             args._background.append(asyncio.create_task(asyncio.to_thread(prefetch_registered_assets, class_id)))
             await check_reference_health(session, args.sam3_url or cfg.perception.sam3.url)
         args._stage = "observation"
@@ -169,7 +168,8 @@ async def run(args):
         # Keep the exact camera/FK packet even if identification or placement
         # fails before planning-input.pkl can be written. Never use it as a live
         # execution observation without the backend's freshness checks.
-        (args.output / "observation.npz").write_bytes(observation_packet)
+        if not getattr(args, "minimal_records", False):
+            (args.output / "observation.npz").write_bytes(observation_packet)
         frame, estimate = decode_camera_request(observed, depth_trunc_m=cfg.perception.depth_trunc_m)
         if getattr(args, "viewer", False):
             timing.phase("observation_viewer")
@@ -198,7 +198,7 @@ async def run(args):
         profile_path = getattr(args, "hardware_profile", None)
         physical = str(observed.get("camera_model", "")).startswith("orbbec/")
         if physical:
-            from tiptop.doosan.hardware import load_hardware_profile, prepare_hardware_model, validate_hardware_observation
+            from tiptop.doosan.hardware import cached_hardware_model, load_hardware_profile, validate_hardware_observation
 
             if profile_path is None:
                 raise ValueError(
@@ -209,7 +209,9 @@ async def run(args):
             )
             validate_hardware_observation(observed, measured_profile)
             pick_place_bounds = measured_profile["workspace"].get("pick_place_bounds_xy_m")
-            hardware = prepare_hardware_model(measured_profile, args.output / "hardware-model")
+            hardware = cached_hardware_model(
+                measured_profile, None if getattr(args, "minimal_records", False) else args.output / "hardware-model"
+            )
             if args._preview is not None:
                 args._preview.spheres = hardware["gripper_spheres"]
                 args._preview.urdf_path = Path(hardware["robot_config"]["robot_cfg"]["kinematics"]["urdf_path"])
@@ -310,7 +312,6 @@ async def run(args):
                 grasp_provider="known_db",
                 client=client,
                 active_task=active,
-                in_place_return=task_settings.preset == "in_place_return",
                 pick_only=task_settings.pick_only,
                 registered_grasp_from_tcp=grasp_from_tcp,
                 cad_mask_min_iou=getattr(args, "cad_mask_min_iou", 0.75),
@@ -325,6 +326,7 @@ async def run(args):
                 preview=args._preview,
                 background_tasks=args._background,
                 surrounding_obstacles=getattr(args, "surrounding_obstacles", True),
+                minimal_records=getattr(args, "minimal_records", False),
             )
             args._timings["perception"] = time.perf_counter() - perception_started
         except APIError as error:
@@ -368,7 +370,8 @@ async def run(args):
         overlay = frame.rgb.copy()
         mask = visual["masks"][index, 0]
         overlay[mask] = (overlay[mask] * 0.6 + np.array([0, 220, 80]) * 0.4).astype(np.uint8)
-        Image.fromarray(overlay).save(args.output / "target-overlay.png", compress_level=1)
+        if not getattr(args, "minimal_records", False):
+            Image.fromarray(overlay).save(args.output / "target-overlay.png", compress_level=1)
         status = (
             f"{'Gemini -> SAM2' if mode == 'gemini_er' else 'Reference -> SAM3'} -> Depth -> FoundationPose -> UON DB\n"
             f"Target: {name}. Task: {TASK_PRESETS[task_settings.preset]['label']}. Planning complete path and home..."
@@ -380,12 +383,13 @@ async def run(args):
             response.raise_for_status()
         timing.phase("planning_input_snapshot")
         # Preserve inference before planning mutates it; disk IO overlaps planning.
-        from tiptop.planning_input import save_planning_input_in_background
+        if not getattr(args, "minimal_records", False):
+            from tiptop.planning_input import save_planning_input_in_background
 
-        args._planning_input_save = save_planning_input_in_background(
-            env, scene, observation, args.output / "planning-input.pkl",
-            background_tasks=args._background, timing=timing,
-        )
+            args._planning_input_save = save_planning_input_in_background(
+                env, scene, observation, args.output / "planning-input.pkl",
+                background_tasks=args._background, timing=timing,
+            )
         if hardware is None:
             from tiptop.doosan.virtual_camera import camera_planning_options
 
@@ -730,13 +734,16 @@ async def run_interactive(args, *, read_instruction=input):
         gc.collect()
 
 
+FIXED_PLANNING_SETTINGS = {"motion_timeout_s", "robot_world_tolerance_m"}  # no CLI or UI option; set in KnownTaskPlanningSettings
+
+
 def parse_args(argv=None):
     from tiptop.doosan.known_task import KnownTaskPlanningSettings
     from tiptop.perception.placement import TABLE_SUPPORT_MODES
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", default="후추통 집고 제자리에 놓아")
-    parser.add_argument("--task-preset", choices=list(TASK_PRESETS), default="in_place_return",
+    parser.add_argument("--task", default="후추통 집고 박스에 놓아")
+    parser.add_argument("--task-preset", choices=list(TASK_PRESETS), default="home_drop",
                         help="Placement task independent of --perception-mode")
     parser.add_argument("--fixed-box-present", action="store_true", default=TaskSettings().fixed_box_present,
                         help=argparse.SUPPRESS)  # Legacy positive flag; installed geometry cannot be disabled.
@@ -773,6 +780,9 @@ def parse_args(argv=None):
                         help="Prepare this sequence's catalog objects, or all, before starting tasks")
     parser.add_argument("--prepare-only", action="store_true",
                         help="Prepare caches/references only; no camera, inference, gateway or robot requests")
+    parser.add_argument("--minimal-records", action="store_true",
+                        help="Demo mode: skip the optional files (camera packet, perception outputs, candidate crops, target "
+                             "overlay, planning-input pickle); the plan, results, timings and live viewer are kept")
     parser.add_argument("--viewer", action="store_true", help="Publish RGB/depth, masks and the final planned grasp to the local viewer")
     parser.add_argument(
         "--surrounding-obstacles", action=argparse.BooleanOptionalAction, default=True,
@@ -814,12 +824,6 @@ def parse_args(argv=None):
     )
     defaults = KnownTaskPlanningSettings()
     parser.add_argument(
-        "--motion-timeout-s",
-        type=float,
-        default=defaults.motion_timeout_s,
-        help="Per-request MotionGen search budget in seconds (default: 1); no automatic increase",
-    )
-    parser.add_argument(
         "--motion-position-tolerance-m",
         type=float,
         default=defaults.motion_position_tolerance_m,
@@ -831,13 +835,6 @@ def parse_args(argv=None):
         default=defaults.motion_rotation_tolerance,
         help="MotionGen quaternion rotation convergence threshold (default: 0.1)",
     )
-    parser.add_argument("--approach-distance-m", type=float, default=defaults.approach_distance_m,
-                        help="Distance of the pre-grasp pose behind the grasp along the approach axis, metres "
-                             "(default: 0.15); must not be shorter than --lift-distance-m")
-    parser.add_argument("--lift-distance-m", type=float, default=defaults.lift_distance_m,
-                        help="Pick-to-lift approach-axis distance in metres (default: 0.05)")
-    parser.add_argument("--lift-hold-s", type=float, default=defaults.lift_hold_s,
-                        help="Stationary hold above the source before lowering, seconds (default: 1)")
     parser.add_argument("--max-wrist-travel-deg", type=float, default=defaults.max_wrist_travel_deg,
                         help="Reject a planned leg whose J4 or J5 moves farther than this from its start, degrees "
                              "(default: 90)")
@@ -850,10 +847,6 @@ def parse_args(argv=None):
     parser.add_argument("--num-particles", type=int, default=defaults.num_particles,
                         help="Most IK-feasible DB grasps, best score first, handed to cuTAMP, one particle each "
                              f"(default: {defaults.num_particles}); more grasps take longer to plan")
-    parser.add_argument("--robot-world-tolerance-m", type=float, default=defaults.robot_world_tolerance_m,
-                        help="Summed depth, metres, by which robot collision spheres may overlap obstacles in cuTAMP's "
-                             f"constraint check (default: {defaults.robot_world_tolerance_m:g}; cuTAMP's own default is 0.001). "
-                             "The motion planner still checks the executed path")
     parser.add_argument("--table-support", choices=TABLE_SUPPORT_MODES, default="ransac-cad",
                         help="How the table support height is obtained: RANSAC plane scored by the posed-CAD bottoms "
                              "(ransac-cad, default), RANSAC scored by the mask-bottom points (ransac-mask), or the "
@@ -875,7 +868,8 @@ def parse_args(argv=None):
         args._cli_started_at = _CLI_STARTED_AT
     try:
         args.planning_settings = KnownTaskPlanningSettings(
-            **{name: getattr(args, name) for name in KnownTaskPlanningSettings.__dataclass_fields__}
+            **{name: getattr(args, name) for name in KnownTaskPlanningSettings.__dataclass_fields__
+               if name not in FIXED_PLANNING_SETTINGS}
         )
     except ValueError as error:
         parser.error(str(error))

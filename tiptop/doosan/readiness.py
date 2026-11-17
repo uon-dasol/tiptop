@@ -174,7 +174,7 @@ async def check_readiness(args):
         from tiptop.perception.sam3_reference import parse_reference_task
 
         class_ids = (
-            [parse_reference_task(perception_instruction, allow_pick_only=task_settings.pick_only)]
+            [parse_reference_task(perception_instruction)]
             if mode == "sam3_reference"
             else [row["class_id"] for row in load_catalog()["objects"]]
         )
@@ -218,7 +218,7 @@ async def check_readiness(args):
                     session,
                     url.rstrip("/") + "/reference",
                     params=dict(
-                        class_id=parse_reference_task(perception_instruction, allow_pick_only=task_settings.pick_only),
+                        class_id=parse_reference_task(perception_instruction),
                         scene=args.reference_scene or cfg.perception.sam3.reference_scene,
                     ),
                 )

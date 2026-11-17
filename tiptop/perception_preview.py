@@ -69,7 +69,7 @@ def gripper_mesh_parts(urdf_path):
 
 
 def project_grasps(world_from_tcp, world_from_cam, intrinsics, spheres, ids, scores, *, limit=32, tool_parts=()):
-    """Project TCP axes, optional CAD outlines, and open-tool collision spheres."""
+    """Project TCP axes, the open fingers' tip points, and open-tool collision spheres."""
     poses = np.linalg.inv(np.asarray(world_from_cam)) @ np.asarray(world_from_tcp)
     k, spheres = np.asarray(intrinsics), np.asarray(spheres)
     # +Z is the DB approach axis; the gripper body lies on its negative side.
@@ -91,19 +91,12 @@ def project_grasps(world_from_tcp, world_from_cam, intrinsics, spheres, ids, sco
                             float(k[0, 0]*radius/center[2]), float(k[1, 1]*radius/center[2])])
         outlines = []
         for name, vertices in tool_parts:
-            points = vertices @ pose[:3, :3].T + pose[:3, 3]
-            if np.any(points[:, 2] <= .001):
+            if "finger" not in name:
                 continue
-            projected = points @ k.T
-            projected = projected[:, :2]/projected[:, 2:]
-            polygon = cv2.convexHull(projected.astype(np.float32)).reshape(-1, 2)
-            outline = dict(part=name, points=polygon.tolist())
-            if "finger" in name:
-                tip = finger_tip(vertices) @ pose[:3, :3].T + pose[:3, 3]
-                if tip[2] > .001:
-                    pixel = k @ tip
-                    outline["tip"] = (pixel[:2] / pixel[2]).tolist()
-            outlines.append(outline)
+            tip = finger_tip(vertices) @ pose[:3, :3].T + pose[:3, 3]
+            if tip[2] > .001:
+                pixel = k @ tip
+                outlines.append(dict(part=name, tip=(pixel[:2] / pixel[2]).tolist()))
         output.append(dict(id=int(ids[i]), score=float(scores[i]), axes=pixels.tolist(), spheres=circles,
                            outlines=outlines, world_from_tcp=np.asarray(world_from_tcp)[i].tolist()))
     return output
@@ -203,17 +196,24 @@ class TaskPreview:
                     self._depth(data["depth_map"])
                 elif event == "detection":
                     rgba = np.zeros((*self.rgb.shape[:2], 4), np.uint8)
+                    instance_ids = np.zeros(self.rgb.shape[:2], np.uint8)  # box index + 1; the viewer filters by target
                     for i, mask in enumerate(np.asarray(data["masks"])[:, 0]):
                         rgba[mask.astype(bool)] = [*_COLORS[i % len(_COLORS)], 110]
+                        instance_ids[mask.astype(bool)] = i + 1
                     self._image("mask", rgba)
+                    self._image("mask_ids", instance_ids)
                     self.state["boxes"] = data["bboxes"]
                     self.state["detector"] = data.get("semantic_source", "gemini_sam2")
+                    # SAM3 candidates are verified one by one; the viewer shows the target once it is final.
+                    self.state["target_final"] = self.state["detector"] != "sam3_reference"
                     self.state["target_label"] = next(
                         (atom["args"][0] for atom in data.get("grounded_atoms", []) if atom.get("args")), None
                     )
                     self.state["status"] = "물체 인식 완료 · 최종 경로 계획 대기"
                 elif event == "target":
                     self.state["target_label"] = data["label"]
+                elif event == "target_final":
+                    self.state["target_final"] = True
                 elif event == "obstacles":
                     self.state["obstacle_scene"] = data
                 elif event == "final_grasp":
@@ -460,13 +460,12 @@ class TaskPreview:
     def _side_grasp(self, tcp):
         parts, finger_heights = [], []
         for name, vertices in gripper_mesh_parts(str(self.urdf_path)):
+            if "finger" not in name:
+                continue
             points = self._side_points(vertices @ tcp[:3, :3].T + tcp[:3, 3])
-            part = dict(part=name, points=cv2.convexHull(points.astype(np.float32)).reshape(-1, 2).tolist())
-            if "finger" in name:
-                finger_heights.append(float(points[:, 1].min()))
-                tip = finger_tip(vertices) @ tcp[:3, :3].T + tcp[:3, 3]
-                part["tip"] = self._side_points([tip])[0].tolist()
-            parts.append(part)
+            finger_heights.append(float(points[:, 1].min()))
+            tip = finger_tip(vertices) @ tcp[:3, :3].T + tcp[:3, 3]
+            parts.append(dict(part=name, tip=self._side_points([tip])[0].tolist()))
         axes = np.array([[0, 0, 0], [0, 0, .07]]) @ tcp[:3, :3].T + tcp[:3, 3]
         return dict(outlines=parts, axes=self._side_points(axes).tolist(),
                     finger_lowest_m=min(finger_heights) if finger_heights else None)
@@ -545,6 +544,7 @@ def preview_saved_task(output):
             preview.update("detection", dict(masks=masks["arr_0"], bboxes=semantic["bboxes"],
                                               semantic_source=semantic["semantic_source"],
                                               grounded_atoms=semantic.get("grounded_atoms", [])))
+            preview.update("target_final", {})
     plan_path = output / "plan.json"
     plan = json.loads(plan_path.read_text()) if plan_path.is_file() else None
     region_file = output / "placement-region.json"

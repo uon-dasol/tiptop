@@ -9,7 +9,9 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
+from tiptop.doosan import hardware as hardware_module
 from tiptop.doosan.hardware import (
+    cached_hardware_model,
     derive_mount_urdf,
     load_hardware_profile,
     prepare_hardware_model,
@@ -296,3 +298,27 @@ def test_assumed_camera_can_be_reviewed_but_saved_plan_cannot_execute(tmp_path):
     )
     with pytest.raises(ValueError, match="physical execution"):
         validate_plan_backend(plan, dict(success=True, robot_system=0, gripper=dict(backend="uon_native")))
+
+
+def test_cached_hardware_model_is_built_once_per_profile_and_records_a_copy(tmp_path, monkeypatch):
+    built = []
+
+    def fake_prepare(profile, output):
+        built.append(Path(output))
+        Path(output).mkdir(parents=True, exist_ok=True)
+        (Path(output) / "robot.yml").write_text("robot")
+        return dict(robot_config={"robot_cfg": {}}, fixed_obstacles=[[1]], gripper_spheres=np.zeros((2, 4)))
+
+    monkeypatch.setattr(hardware_module, "HARDWARE_CACHE", tmp_path / "cache")
+    monkeypatch.setattr(hardware_module, "prepare_hardware_model", fake_prepare)
+    monkeypatch.setattr(hardware_module, "_PREPARED", {})
+    profile = dict(version=1, tool=dict(a=1), _camera_calibration=dict(x=1))
+    first = cached_hardware_model(profile, tmp_path / "task-1/hardware-model")
+    first["fixed_obstacles"][0].append(2)  # a caller's edits must not reach the next task
+    first["gripper_spheres"][:] = 1
+    second = cached_hardware_model(profile)
+    assert len(built) == 1 and second["fixed_obstacles"] == [[1]] and not second["gripper_spheres"].any()
+    assert (tmp_path / "task-1/hardware-model/robot.yml").read_text() == "robot"
+    assert not (tmp_path / "task-2").exists()
+    cached_hardware_model(dict(profile, tool=dict(a=2)))
+    assert len(built) == 2 and built[0] != built[1] and built[0].parent == tmp_path / "cache"

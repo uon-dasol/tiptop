@@ -1,0 +1,10 @@
+{
+  "present": true,
+  "box_center_x_m": 0.0,
+  "box_center_y_m": 0.35,
+  "box_bottom_z_m": 0.0,
+  "box_size_x_m": 0.35,
+  "box_size_y_m": 0.2,
+  "box_size_z_m": 0.15,
+  "position_source": "base_link metres; 0.20m-deep box spans Y=0.250..0.450m, outside the red tape strip (Y=0.452..0.477)"
+}

@@ -10,12 +10,12 @@ import numpy as np
 TASK_PRESETS_PATH = Path(__file__).parent / "config/task_presets.json"
 TASK_PRESETS = json.loads(TASK_PRESETS_PATH.read_text())
 FIXED_BOX_NAME = "preset_fixed_box"
-_BOX = TASK_PRESETS["fixed_box"]
+_BOX = json.loads((Path(__file__).parent / "config/fixed_box.json").read_text())
 
 
 @dataclass(frozen=True)
 class TaskSettings:
-    preset: str = "in_place_return"
+    preset: str = "home_drop"
     release_height_m: float | None = None
     fixed_box_present: bool = _BOX.get("present", False)
     box_center_x_m: float = _BOX["box_center_x_m"]
@@ -34,7 +34,7 @@ class TaskSettings:
             raise ValueError("fixed_box_present must be a boolean")
         # Installed geometry belongs to the workspace, regardless of the task.
         # Old UI payloads cannot disable a box declared present in configuration.
-        if self.pick_only or _BOX.get("present", False):
+        if _BOX.get("present", False):
             object.__setattr__(self, "fixed_box_present", True)
         values = [v for k, v in asdict(self).items() if k != "preset"]
         if not np.isfinite(values).all() or self.release_height_m < 0:
@@ -45,17 +45,17 @@ class TaskSettings:
     @property
     def pick_only(self):
         """Presets whose destination is fixed, so perception only has to find the object to pick."""
-        return self.preset in ("fixed_box", "home_drop")
+        return self.preset == "home_drop"
 
     @property
     def holding_goal(self):
         """Presets planned as a single Pick; the fixed destination is handled after the grasp."""
-        return self.preset in ("in_place_return", "home_drop")
+        return self.preset == "home_drop"
 
     def validate_perception_mode(self, mode):
         allowed = TASK_PRESETS[self.preset].get("perception_modes")
         if allowed and mode not in allowed:
-            raise ValueError("인식한 목적지에 놓기는 Gemini 인식이 필요합니다. SAM3에서는 고정 박스를 선택하세요.")
+            raise ValueError("인식한 목적지에 놓기는 Gemini 인식이 필요합니다. SAM3에서는 박스에 놓기를 선택하세요.")
 
     def perception_instruction(self, instruction):
         """Fixed destinations never ask the vision backend to find a box."""
@@ -141,45 +141,41 @@ def prepare_task_environment(env, scene, settings, *, fixed_obstacles=()):
     if len(scene.grasps) != 1:
         raise ValueError("A task preset requires exactly one picked object")
     name = next(iter(scene.grasps))
-    box = register_fixed_box(env, settings, fixed_obstacles) if settings.fixed_box_present else None
+    if settings.fixed_box_present:
+        register_fixed_box(env, settings, fixed_obstacles)
     if settings.holding_goal:
         env.goal_state = frozenset({Holding.ground(name)})
         env.type_to_objects["Surface"] = [scene.table_cuboid]
         return env, scene.perception_results.get("placement_region")
 
-    if settings.preset == "fixed_box":
-        env.type_to_objects["Surface"] = [scene.table_cuboid, box]
-        env.goal_state = frozenset({On.ground(name, box.name), HandEmpty.ground()})
-        region = settings.box_region()
-    else:
-        goals = [goal for goal in env.goal_state if goal.name == "On"]
-        if len(goals) != 1 or set(env.goal_state) != {goals[0], HandEmpty.ground()} or goals[0].values[0] != name:
-            raise ValueError("인식한 목적지는 한 물체의 On(물체, 목적지) 목표가 필요합니다.")
-        surface_name = goals[0].values[1]
-        surfaces = [item for item in env.type_to_objects["Surface"] if item.name == surface_name]
-        if len(surfaces) != 1:
-            raise ValueError("Perceived On destination is missing from the surface/collision scene")
-        if surface_name == scene.table_cuboid.name:
-            # Perception lowers its table collision box by 20 mm. A Place goal
-            # needs the measured support plane, unlike that pick-clearance box.
-            from tiptop.perception.placement import TABLE_BOX_LOWERING_M
+    goals = [goal for goal in env.goal_state if goal.name == "On"]
+    if len(goals) != 1 or set(env.goal_state) != {goals[0], HandEmpty.ground()} or goals[0].values[0] != name:
+        raise ValueError("인식한 목적지는 한 물체의 On(물체, 목적지) 목표가 필요합니다.")
+    surface_name = goals[0].values[1]
+    surfaces = [item for item in env.type_to_objects["Surface"] if item.name == surface_name]
+    if len(surfaces) != 1:
+        raise ValueError("Perceived On destination is missing from the surface/collision scene")
+    if surface_name == scene.table_cuboid.name:
+        # Perception lowers its table collision box by 20 mm. A Place goal
+        # needs the measured support plane, unlike that pick-clearance box.
+        from tiptop.perception.placement import TABLE_BOX_LOWERING_M
 
-            surface = deepcopy(scene.table_cuboid)
-            surface.pose[2] += TABLE_BOX_LOWERING_M
-            env.statics = [surface if item.name == surface_name else item for item in env.statics]
-            env.type_to_objects["Surface"] = [surface if item.name == surface_name else item
-                                               for item in env.type_to_objects["Surface"]]
-            surfaces = [surface]
-        mesh = surfaces[0].get_trimesh_mesh(process=False)
-        from scipy.spatial.transform import Rotation
+        surface = deepcopy(scene.table_cuboid)
+        surface.pose[2] += TABLE_BOX_LOWERING_M
+        env.statics = [surface if item.name == surface_name else item for item in env.statics]
+        env.type_to_objects["Surface"] = [surface if item.name == surface_name else item
+                                           for item in env.type_to_objects["Surface"]]
+        surfaces = [surface]
+    mesh = surfaces[0].get_trimesh_mesh(process=False)
+    from scipy.spatial.transform import Rotation
 
-        pose = np.asarray(surfaces[0].pose)
-        rotation = Rotation.from_quat(pose[[4, 5, 6, 3]]).as_matrix()
-        vertices = np.asarray(mesh.vertices) @ rotation.T + pose[:3]
-        low, high = vertices.min(0), vertices.max(0)
-        region = dict(source="perceived_surface", center_xy_m=((low + high) / 2)[:2].tolist(),
-                      size_xy_m=(high - low)[:2].tolist(), support_z_m=float(high[2]),
-                      destination=surface_name)
+    pose = np.asarray(surfaces[0].pose)
+    rotation = Rotation.from_quat(pose[[4, 5, 6, 3]]).as_matrix()
+    vertices = np.asarray(mesh.vertices) @ rotation.T + pose[:3]
+    low, high = vertices.min(0), vertices.max(0)
+    region = dict(source="perceived_surface", center_xy_m=((low + high) / 2)[:2].tolist(),
+                  size_xy_m=(high - low)[:2].tolist(), support_z_m=float(high[2]),
+                  destination=surface_name)
     region.update(release_height_m=settings.release_height_m,
                   release_bottom_z_m=region["support_z_m"] + settings.release_height_m,
                   height_reference="object bottom above destination top; cuTAMP collision clearance also applies")

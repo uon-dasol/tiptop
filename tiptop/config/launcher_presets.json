@@ -1,7 +1,7 @@
 {
   "common": {
     "task_preset": "home_drop",
-    "task": "스팸 집고 초기 위치에서 떨어뜨려",
+    "task": "스팸 집고 박스에 놓아",
     "camera_url": "http://127.0.0.1:13348",
     "hardware_profile": "tiptop/config/m1013_fixed_hardware.declared.json",
     "gateway_url": "http://127.0.0.1:8090",
@@ -11,11 +11,6 @@
     "max_wrist_travel_deg": 90,
     "min_engagement_depth_m": "0.02",
     "num_particles": "8",
-    "robot_world_tolerance_m": 0.005,
-    "approach_distance_m": 0.15,
-    "lift_distance_m": 0.05,
-    "lift_hold_s": 1,
-    "motion_timeout_s": 1,
     "table_support": "declared",
     "viewer": true,
     "surrounding_obstacles": true
