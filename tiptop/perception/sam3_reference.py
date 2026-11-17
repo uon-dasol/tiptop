@@ -26,15 +26,22 @@ class ReferenceDetectionError(ValueError):
         self.perception_diagnostics = diagnostics
 
 
-def parse_reference_task(instruction):
-    """Resolve an explicit canonical-class pick-and-return command."""
+def parse_reference_task(instruction, *, allow_pick_only=False):
+    """Resolve a catalog instruction; a preset backend may explicitly allow pick-only."""
+    pick = re.fullmatch(r"\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s*(?:을|를)?\s*집어\s*[.!]?\s*", instruction)
+    if pick and allow_pick_only:
+        registered_object(pick[1], check_files=False)
+        return pick[1]
     match = re.fullmatch(
         r"\s*`?([A-Za-z][A-Za-z0-9_]*)`?\s*(?:을|를)?\s*집(?:고|어서)\s*"
         r"(?:들어\s*올렸다가\s*)?제\s*자리(?:에|로)\s*놓(?:아\s*줘|아주세요|아|기)\s*[.!]?\s*",
         instruction,
     )
     if match is None:
-        raise ValueError("Reference mode requires: <canonical_class_id>를 집고 제자리에 놓아")
+        expected = "Reference mode requires: <canonical_class_id>를 집고 제자리에 놓아"
+        if allow_pick_only:
+            expected += " (or <canonical_class_id> 집어)"
+        raise ValueError(expected)
     class_id = match.group(1)
     registered_object(class_id, check_files=False)
     return class_id
@@ -223,7 +230,7 @@ async def detect_reference(
     appearance_weight=None,
 ):
     started = time.perf_counter()
-    class_id = parse_reference_task(instruction)
+    class_id = parse_reference_task(instruction, allow_pick_only=True)
     stream = io.BytesIO()
     from tiptop.serialization import savez_fast
 

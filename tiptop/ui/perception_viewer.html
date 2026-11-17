@@ -288,6 +288,13 @@ function draw(){
  const canvas=$('rgb'),ctx=canvas.getContext('2d');canvas.width=state.width;canvas.height=state.height;
  const scale=canvas.width/view.w;unit=view.w/Math.max(1,canvas.clientWidth);ctx.setTransform(scale,0,0,scale,-view.x*scale,-view.y*scale);ctx.drawImage(images.rgb,0,0);
  if(images.mask&&$('maskToggle').checked){ctx.globalAlpha=.65;ctx.drawImage(images.mask,0,0);ctx.globalAlpha=1}
+ const placement=state.placement;
+ if(placement){
+  const polygon=(points,color,dashed=false)=>{ctx.save();ctx.strokeStyle=color;ctx.lineWidth=2*unit;if(dashed)ctx.setLineDash([6*unit,4*unit]);ctx.beginPath();points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.stroke();ctx.restore()};
+  polygon(placement.bottom,'#78d4e0');polygon(placement.top,'#78d4e0');if(placement.is_destination!==false)polygon(placement.release,'#ffd47b',true);
+  if(placement.region.source==='fixed_box')for(let i=0;i<4;i++)pathLine(ctx,placement.bottom[i],placement.top[i],'#78d4e0',unit);
+  if(placement.region.source!=='fixed_box')drawOutsideObjectLabel(ctx,`목적지 · 상단 +${Math.round(placement.region.release_height_m*100)}cm`,placement.bottom,unit,view);
+ }
  if($('boxToggle').checked)for(const box of state.boxes){const [y1,x1,y2,x2]=box.box_2d.map(v=>v/1000);const x=x1*canvas.width,y=y1*canvas.height;ctx.strokeStyle='#b6ed90';ctx.lineWidth=1.2*unit;ctx.strokeRect(x,y,(x2-x1)*canvas.width,(y2-y1)*canvas.height);const label=detectionLabel(box);if(!label)continue;drawOutsideObjectLabel(ctx,label,[[x,y],[x2*canvas.width,y2*canvas.height]],unit,view)}
  if($('graspToggle').checked){if(graspMode==='candidates'){const visible=state.grasps.filter(g=>g.id!==selectedId).slice(0,Number($('count').value)-1);for(const g of visible)drawGrasp(ctx,g,false)}const selected=activeGrasp();if(selected)drawGrasp(ctx,selected,true)}
  const depth=$('depth');depth.width=state.width;depth.height=state.height;if(images.depth)depth.getContext('2d').drawImage(images.depth,view.x,view.y,view.w,view.h,0,0,depth.width,depth.height);
@@ -361,8 +368,9 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
  }
  function render(){
   const box=$('lfields');box.replaceChildren();let modeFields=null,modeTitle=null;
+  values[mode].fixed_box_present=!!cfg.task_presets.fixed_box.present||values[mode].task_preset==='fixed_box';
   for(const field of [...cfg.fields].sort((a,b)=>!!a.modes-!!b.modes)){
-   if(field.hidden||field.modes&&!field.modes.includes(mode))continue;
+   if(field.hidden||field.modes&&!field.modes.includes(mode)||field.tasks&&!field.tasks.includes(values[mode].task_preset)&&!(field.key.startsWith('box_')&&values[mode].fixed_box_present))continue;
    if(field.modes&&!modeFields){modeTitle=document.createElement('div');modeTitle.className='lsep mode-options-title';modeTitle.textContent=(mode==='sam3_reference'?'SAM3':'Gemini')+' 전용 설정';modeFields=document.createElement('div');modeFields.className='mode-fields';box.append(modeTitle,modeFields)}
    const label=document.createElement('label');let input;
    if(field.type==='checkbox'){
@@ -370,10 +378,10 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
     input.addEventListener('change',()=>{values[mode][field.key]=input.checked;schedulePreview()});label.append(input,field.label);
    }else{
     label.className='field'+(field.key==='task'?' wide':'');
-    if(field.type==='select'){input=document.createElement('select');for(const option of field.options)input.add(new Option(option,option))}
+    if(field.type==='select'){input=document.createElement('select');for(const option of field.options){const entry=new Option(field.option_labels?.[option]??option,option);if(field.key==='task_preset'){const modes=cfg.task_presets[option].perception_modes;entry.disabled=!!modes&&!modes.includes(mode)}input.add(entry)}}
     else{input=document.createElement('input');input.type=field.type==='number'?'number':'text';if(field.type==='number')input.step='any'}
     input.value=values[mode][field.key]??'';if(field.key==='task'){input.id='taskInput';$('rgbTask').value=input.value}
-    input.addEventListener('input',()=>{values[mode][field.key]=input.value;if(field.key==='task'){$('rgbTask').value=input.value;markObject()}schedulePreview()});label.append(field.label,input);
+    input.addEventListener('input',()=>{values[mode][field.key]=input.value;if(field.key==='task'){$('rgbTask').value=input.value;markObject()}if(field.key==='task_preset'){const [id]=splitTask(values[mode].task||''),object=objects.find(o=>o.class_id===id),preset=cfg.task_presets[input.value];if(object)values[mode].task=object.name_ko+' '+preset.action;values[mode].release_height_m=preset.release_height_m;if(input.value==='fixed_box')values[mode].fixed_box_present=true;render();markObject()}schedulePreview()});label.append(field.label,input);
    }
    if(field.key==='appearance_ranking')modeTitle.append(label);else (field.modes?modeFields:box).append(label);
   }
@@ -386,7 +394,7 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
   try{$('cmdPreview').value=(await api('/api/command',{mode,kind,values:values[mode]})).command}
   catch(error){$('cmdPreview').value='⚠ '+error.message}
  }
- const ACTION='집고 제자리에 놓아';
+ const action=()=>cfg.task_presets[values[mode].task_preset]?.action??'집고 제자리에 놓아';
  function splitTask(text){
   const t=text.trim();
   for(const o of [...objects].sort((a,b)=>b.name_ko.length-a.name_ko.length)){
@@ -398,7 +406,7 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
  function pickObject(id){
   const [current,rest]=splitTask(values[mode].task||'');
   const object=objects.find(o=>o.class_id===id);
-  values[mode].task=object.name_ko+' '+(objects.some(o=>o.class_id===current)&&rest?rest:ACTION);
+  values[mode].task=object.name_ko+' '+(objects.some(o=>o.class_id===current)&&rest?rest:action());
   render();markObject();preview();
  }
  function buildObjects(){
@@ -410,7 +418,7 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
   });
   $('objCount').textContent=`(${objects.length})`;$('objects').classList.toggle('hidden',!objects.length);markObject();
  }
- function setMode(next){values[next].task=values[mode].task;mode=next;mark();render();markObject();preview();refreshStatus()}
+ function setMode(next){const current=values[mode],allowed=cfg.task_presets[current.task_preset]?.perception_modes;if(allowed&&!allowed.includes(next)){$('runMsg').textContent='인식한 목적지는 Gemini로 찾습니다. SAM3를 사용하려면 작업 프리셋을 먼저 변경하세요.';return}values[next].task=current.task;values[next].task_preset=current.task_preset;for(const key of ['fixed_box_present','release_height_m','box_center_x_m','box_center_y_m','box_bottom_z_m','box_size_x_m','box_size_y_m','box_size_z_m'])values[next][key]=current[key];mode=next;mark();render();markObject();preview();refreshStatus()}
  const SGR=/\x1b\[([0-9;]*)m/g,OTHER_ESCAPES=/\x1b\[[0-9;?]*[A-Za-ln-z]/g;
  const PALETTE={30:'#6b7a74',31:'#f7ad8c',32:'#b6ed90',33:'#e8d27a',34:'#7aa7f0',35:'#d99be8',36:'#78d4e0',37:'#edf4f0',90:'#8a9a94',91:'#ff8f80',92:'#c8f5a8',93:'#f5e08c',94:'#9dbcf5',95:'#e5b3f0',96:'#9fe3ee',97:'#ffffff'};
  function coloredLine(text){

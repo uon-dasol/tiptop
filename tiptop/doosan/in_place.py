@@ -28,7 +28,10 @@ def reverse_path(path):
     return JointState(position=path.position.flip(0).clone(), velocity=-path.velocity.flip(0).clone())
 
 
-def stationary_boundaries(path, *, terminal_velocity_tolerance_rad_s=2.5e-3):
+SPEED_FACTOR = 1.0  # every planned leg runs at the planner's full speed
+
+
+def stationary_boundaries(path, *, terminal_velocity_tolerance_rad_s=5e-3):
     """Remove only boundary finite-difference residues at an initial hold.
 
     cuRobo can report a small initial velocity despite two coincident initial
@@ -68,13 +71,47 @@ def wrist_travel_deg(path):
     return float(np.degrees((wrist - wrist[0]).abs().max().item()))
 
 
-def make_in_place_solver(settings):
+def attach_object_at_grasp(mg, world, obj, world_from_obj, grasp_state):
+    """Attach the object's sampled collision spheres to the gripper, as cuTAMP's own Pick does."""
+    from curobo.geom.sphere_fit import SphereFitType
+    from curobo.geom.types import Sphere
+    from curobo.types.math import Pose
+
+    obstacle = mg.world_model.get_obstacle(obj)
+    original = obstacle.get_bounding_spheres
+
+    def bounding_spheres(self, *args, **kwargs):
+        spheres = world.get_collision_spheres(obj)
+        pose = Pose.from_matrix(world_from_obj)
+        if kwargs.get("pre_transform_pose") is not None:
+            pose = kwargs["pre_transform_pose"].multiply(pose)
+        points = pose.transform_points(self.tensor_args.to_device(spheres[:, :3].cpu().numpy())).cpu().view(-1, 3).numpy()
+        radii = spheres[:, 3].cpu().numpy()
+        return [Sphere(name=f"{self.name}_sph_{i}", pose=[*points[i], 1, 0, 0, 0], radius=radii[i])
+                for i in range(len(points))]
+
+    obstacle.get_bounding_spheres = bounding_spheres.__get__(obstacle)
+    try:
+        mg.attach_objects_to_robot(grasp_state, object_names=[obj], surface_sphere_radius=0.005,
+                                   sphere_fit_type=SphereFitType.VOXEL_VOLUME_SAMPLE_SURFACE,
+                                   voxelize_method="subdivide")
+    finally:
+        obstacle.get_bounding_spheres = original
+
+
+def make_in_place_solver(settings, *, drop_at_home=False):
     """Use cuTAMP's grasp, lift back along the descend path, then release and return home.
 
     The approach stops `approach_distance_m` behind the grasp and the descend passes through a stop
     `lift_distance_m` behind it, so the last stretch is the same path the lift reverses. The lift is not
     collision-checked with the object attached. Home starts at the lifted joints. Nothing is sent to
     any execution backend here.
+
+    With `drop_at_home` the object stays in the gripper and the legs follow cuTAMP's own Pick and Place: the
+    approach stops `approach_distance_m` behind the grasp, one straight descend reaches it, and the object is
+    attached at the grasp. The lift is a new straight plan `lift_distance_m` back, checked with the object; if the
+    grasp pose collides as a start state the lift is planned once without the object, as cuTAMP's Place does.
+    Home is then planned with the object and the gripper opens at the captured home.
     """
     def solve(plan_info, best_particle, world, config, timer, visualizer,
               obj_to_initial_pose, timeline="curobo", motion_gen=None):
@@ -85,6 +122,9 @@ def make_in_place_solver(settings):
         from curobo.wrap.reacher.motion_gen import MotionGenPlanConfig
         from cutamp.motion_solver import MotionPlanningError
         from cutamp.utils.common import action_6dof_to_mat4x4
+
+        class StartStateCollision(MotionPlanningError):
+            pass
 
         picks = [op for op in plan_info["plan_skeleton"] if op.operator.name == "Pick"]
         if len(picks) != 1 or any(op.operator.name not in {"MoveFree", "Pick"}
@@ -97,7 +137,7 @@ def make_in_place_solver(settings):
             mg.world_coll_checker.enable_obstacle(enable=True, name=name)
             mg.world_collision.update_obstacle_pose(name, Pose.from_matrix(pose))
         plan_config = MotionGenPlanConfig(timeout=settings.motion_timeout_s,
-            enable_finetune_trajopt=False, time_dilation_factor=config.time_dilation_factor)
+            enable_finetune_trajopt=False, time_dilation_factor=SPEED_FACTOR)
         straight = plan_config.clone()
         straight.pose_cost_metric = PoseCostMetric(hold_partial_pose=True,
             hold_vec_weight=world.tensor_args.to_device([.1, .1, .1, .1, .1, 0]), project_to_goal_frame=True)
@@ -115,18 +155,15 @@ def make_in_place_solver(settings):
             offset[2, 3] = -distance
             return target @ offset
 
-        def leg(start, goal, options, label, *, speed_factor,
-                terminal_velocity_tolerance_rad_s=2.5e-3, joint_goal=False):
-            options = options.clone()
-            options.time_dilation_factor = speed_factor
+        def leg(start, goal, options, label, *, joint_goal=False):
             started = time.perf_counter()
             result = (mg.plan_single_js(start, goal, options) if joint_goal
                       else mg.plan_single(start, Pose.from_matrix(goal), options))
             if not bool(result.success):
-                raise MotionPlanningError(f"{label}: {result.status}")
+                collides = getattr(result.status, "name", None) == "INVALID_START_STATE_WORLD_COLLISION"
+                raise (StartStateCollision if collides else MotionPlanningError)(f"{label}: {result.status}")
             try:
-                path = stationary_boundaries(result.get_interpolated_plan(),
-                    terminal_velocity_tolerance_rad_s=terminal_velocity_tolerance_rad_s)
+                path = stationary_boundaries(result.get_interpolated_plan())
             except ValueError as error:
                 raise MotionPlanningError(f"{label}: {error}") from error
             travel = wrist_travel_deg(path)
@@ -134,18 +171,15 @@ def make_in_place_solver(settings):
                 raise MotionPlanningError(
                     f"{label}: J4/J5 travel {travel:.0f} deg exceeds {settings.max_wrist_travel_deg:g} deg"
                 )
-            _log.info("%s planning took %.2fs (speed factor %.3g, terminal tolerance %.4g rad/s)",
-                      label, time.perf_counter() - started, speed_factor, terminal_velocity_tolerance_rad_s)
+            _log.info("%s planning took %.2fs", label, time.perf_counter() - started)
             return dict(type="trajectory", label=label, plan=path, dt=float(result.interpolation_dt))
 
-        approach = leg(q0, behind(settings.approach_distance_m), plan_config, "Pick.approach",
-                       speed_factor=settings.approach_speed_factor, terminal_velocity_tolerance_rad_s=4e-3)
+        approach = leg(q0, behind(settings.approach_distance_m), plan_config, "Pick.approach")
         above = approach
-        if settings.approach_distance_m > settings.lift_distance_m:
+        if not drop_at_home and settings.approach_distance_m > settings.lift_distance_m:
             above = leg(JointState.from_position(approach["plan"].position[-1:]), behind(settings.lift_distance_m),
-                        straight, "Pick.descend far", speed_factor=settings.descend_far_speed_factor)
-        final = leg(JointState.from_position(above["plan"].position[-1:]), target, straight, "Pick.descend",
-                    speed_factor=settings.descend_near_speed_factor)
+                        straight, "Pick.descend far")
+        final = leg(JointState.from_position(above["plan"].position[-1:]), target, straight, "Pick.descend")
         descend = final
         if above is not approach:
             if above["dt"] != final["dt"]:
@@ -156,27 +190,41 @@ def make_in_place_solver(settings):
                 raise MotionPlanningError(
                     f"Pick.descend: J4/J5 travel {travel:.0f} deg exceeds {settings.max_wrist_travel_deg:g} deg"
                 )
-        lift_plan = reverse_path(final["plan"])
-        lift_ratio = settings.lift_speed_factor / settings.descend_near_speed_factor
-        # Keep the checked joint positions and stationary endpoints. Changing
-        # lift speed requires scaling its velocity and sample time together.
-        if lift_ratio != 1:
-            lift_plan.velocity = lift_plan.velocity * lift_ratio
-        lift = dict(type="trajectory", label="Place.lift", plan=lift_plan, dt=final["dt"] / lift_ratio)
+        if drop_at_home:
+            grasp_position = descend["plan"].position[-1:]
+            attach_object_at_grasp(mg, world, obj, obj_to_initial_pose[obj], JointState.from_position(grasp_position))
+            try:
+                lift = leg(JointState.from_position(grasp_position.clone()), behind(settings.lift_distance_m),
+                           straight, "Place.lift")
+            except StartStateCollision:
+                # The picked object rests on its support, so only this lift is planned without it.
+                kinematics_config = mg.kinematics.kinematics_config
+                object_spheres = kinematics_config.get_link_spheres("attached_object").clone()
+                kinematics_config.detach_object("attached_object")
+                try:
+                    lift = leg(JointState.from_position(grasp_position.clone()), behind(settings.lift_distance_m),
+                               plan_config, "Place.lift")
+                finally:
+                    kinematics_config.attach_object(sphere_tensor=object_spheres, link_name="attached_object")
+        else:
+            lift = dict(type="trajectory", label="Place.lift", plan=reverse_path(final["plan"]), dt=final["dt"])
 
+        home = leg(JointState.from_position(lift["plan"].position[-1:]),
+                   JointState.from_position(home_position.clone()),
+                   plan_config, "Home", joint_goal=True)
+        # Carry the successful particle's exact goal with its completed path.
+        # The viewer must not infer its DB source from the FK residual alone.
+        descend["grasp_target_world_from_tcp"] = target.detach().cpu().numpy().tolist()
+        close = dict(type="gripper", label="Pick.close", action="close")
+        release = dict(type="gripper", label="Place.open", action="open")
+        if drop_at_home:
+            mg.detach_object_from_robot("attached_object")
+            return [approach, descend, close, lift, home, release]
         lifted = lift["plan"].position[-1:].repeat(2, 1)
         hold = dict(type="trajectory", label="Place.hold",
                     plan=JointState(position=lifted, velocity=torch.zeros_like(lifted)),
                     dt=settings.lift_hold_s/2)
-        home = leg(JointState.from_position(lift["plan"].position[-1:]),
-                   JointState.from_position(home_position.clone()),
-                   plan_config, "Home", speed_factor=settings.home_speed_factor,
-                   terminal_velocity_tolerance_rad_s=4e-3, joint_goal=True)
-        # Carry the successful particle's exact goal with its completed path.
-        # The viewer must not infer its DB source from the FK residual alone.
-        descend["grasp_target_world_from_tcp"] = target.detach().cpu().numpy().tolist()
-        return [approach, descend, dict(type="gripper", label="Pick.close", action="close"), lift, hold,
-                dict(type="gripper", label="Place.open", action="open"), home]
+        return [approach, descend, close, lift, hold, release, home]
 
     return solve
 

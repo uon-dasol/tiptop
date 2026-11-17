@@ -633,6 +633,7 @@ async def run_perception(
     client=None,
     active_task=None,
     in_place_return=False,
+    pick_only=False,
     registered_grasp_from_tcp=None,
     perception_mode=None,
     sam3_url=None,
@@ -846,13 +847,13 @@ async def run_perception(
         processed_scene = await process_coroutine
     processed_scene.perception_results = results
 
-    if in_place_return:
-        if provider != "known_db":
-            raise ValueError("In-place return requires a known CAD target")
+    if (in_place_return or pick_only) and provider != "known_db":
+        raise ValueError("In-place return and preset picking require a known CAD target")
+    if provider == "known_db":
         from tiptop.doosan.in_place import source_region
         from tiptop.perception.known_objects import registered_target, require_return_in_place
 
-        if results["semantic_source"] == "gemini":
+        if in_place_return and results["semantic_source"] == "gemini":
             require_return_in_place(results["grounded_atoms"])
         label, entry = registered_target(results["bboxes"], results["grounded_atoms"])
         estimate = processed_scene.grasps[label]["registered"]["pose"]["world_from_cad"]
@@ -860,12 +861,14 @@ async def run_perception(
         vertices = vertices @ estimate[:3, :3].T + estimate[:3, 3]
         table_bounds = (np.asarray(processed_scene.table_cuboid.pose[:3])
                         + np.array([-.5, .5])[:, None]*np.asarray(processed_scene.table_cuboid.dims))
-        results["placement_region"] = source_region(table_bounds, vertices, pick_place_bounds_xy)
-        results["placement_region"]["table_support"] = processed_scene.table_support
+        pick_region = source_region(table_bounds, vertices, pick_place_bounds_xy)
+        pick_region["table_support"] = processed_scene.table_support
         if preview is not None:
-            await asyncio.to_thread(preview.side_scene, vertices, results["placement_region"]["support_z_m"], observation.world_from_cam)
-        results["grounded_atoms"] = [{"predicate": "holding", "args": [label]}]
-        (save_dir / "placement-region.json").write_text(json.dumps(results["placement_region"], indent=2)+"\n")
+            await asyncio.to_thread(preview.side_scene, vertices, pick_region["support_z_m"], observation.world_from_cam)
+        if in_place_return or pick_only:
+            results["placement_region"] = pick_region
+            results["grounded_atoms"] = [{"predicate": "holding", "args": [label]}]
+            (save_dir / "placement-region.json").write_text(json.dumps(pick_region, indent=2)+"\n")
 
     if log_to_rerun:
         bbox_viz, masks_viz = save_result
@@ -877,6 +880,9 @@ async def run_perception(
         if not registered_grasps or len(registered_grasps) != 1:
             raise ValueError("Target-only collision registration requires one registered grasp target")
         collision_labels = set(registered_grasps)
+        # A perceived destination remains an obstacle even when other objects
+        # are excluded. The fixed destination is registered by the task adapter.
+        collision_labels.update(arg for atom in results["grounded_atoms"] for arg in atom.get("args", []))
     results["surrounding_obstacles"] = surrounding_obstacles
     env, all_surfaces = create_tamp_environment(
         processed_scene.object_meshes,
@@ -884,7 +890,7 @@ async def run_perception(
         results["grounded_atoms"],
         include_workspace,
         movable_labels=set(registered_grasps)
-        if registered_grasps is not None and results["semantic_source"] == "sam3_reference" else None,
+        if registered_grasps is not None else None,
         collision_labels=collision_labels,
     )
     if preview is not None:

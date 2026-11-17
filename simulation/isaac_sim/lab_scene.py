@@ -129,13 +129,10 @@ def add_work_area_tape(stage, right_bounds, width=.025):
     return np.stack([low[:2]+width, high[:2]-width])
 
 
-def lab_preparation(environment, camera, *, hardware_profile=LAB_HARDWARE_PROFILE):
-    """Build the lab configuration directly from its USD and physical profile."""
+def validate_lab_geometry(environment, camera, hardware):
+    """Compare USD geometry/optics with a loaded profile, without planning imports."""
     from copy import deepcopy
-    from tiptop.doosan.hardware import load_hardware_profile, hardware_profile_fingerprint
-    from tiptop.doosan.virtual_camera import load_camera_preparation
 
-    hardware = load_hardware_profile(hardware_profile)
     calibration = hardware["_camera_calibration"]
     if hardware["camera_profile"]["mount"] != "fixed":
         raise ValueError("Lab synchronization requires a fixed-camera hardware profile")
@@ -145,18 +142,6 @@ def lab_preparation(environment, camera, *, hardware_profile=LAB_HARDWARE_PROFIL
     if not np.allclose(camera.world_from_cam(), optical_pose, atol=1e-6, rtol=0):
         raise ValueError("Lab optical camera pose differs from the shared hardware profile")
 
-    profile = deepcopy(hardware["camera_profile"])
-    profile.update(
-        model_name="gemini_336l_lab_rgbd", sensor_model_name="isaac_geometric_rgbd",
-        resolution_wh=[camera.width, camera.height],
-        baseline_m=abs(float(camera.factory["ir_right_from_ir_left"][0][3])),
-        horizontal_fov_deg=float(np.rad2deg(2*np.arctan(camera.width/(2*camera.intrinsics[0,0])))),
-        intrinsics=camera.intrinsics.tolist(),
-        distortion_opencv=camera.specs["RGB180"]["D"].tolist(),
-        optics="SDK RGB180 K/D; undistorted RGB and aligned ideal geometric depth; no stereo noise model",
-        collision_geometry_in_fixed_obstacles=False,
-        fixed_base_world_contact=hardware["workspace"].get("fixed_base_world_contact", False),
-    )
     # The USD retains detailed camera colliders. Planning uses the same padded
     # body/bracket envelopes as the physical profile, with its body-frame rig.
     obstacles = [deepcopy(row) for row in environment["fixed_obstacles"]
@@ -179,6 +164,29 @@ def lab_preparation(environment, camera, *, hardware_profile=LAB_HARDWARE_PROFIL
     if not np.allclose(environment["pick_place_bounds_xy_m"], hardware["workspace"]["pick_place_bounds_xy_m"],
                        atol=1e-6, rtol=0):
         raise ValueError("Lab work area differs from the shared hardware profile")
+    return obstacles
+
+
+def lab_preparation(environment, camera, *, hardware_profile=LAB_HARDWARE_PROFILE):
+    """Build the lab configuration directly from its USD and physical profile."""
+    from copy import deepcopy
+    from tiptop.doosan.hardware import load_hardware_profile, hardware_profile_fingerprint
+    from tiptop.doosan.virtual_camera import load_camera_preparation
+
+    hardware = load_hardware_profile(hardware_profile)
+    obstacles = validate_lab_geometry(environment, camera, hardware)
+    profile = deepcopy(hardware["camera_profile"])
+    profile.update(
+        model_name="gemini_336l_lab_rgbd", sensor_model_name="isaac_geometric_rgbd",
+        resolution_wh=[camera.width, camera.height],
+        baseline_m=abs(float(camera.factory["ir_right_from_ir_left"][0][3])),
+        horizontal_fov_deg=float(np.rad2deg(2*np.arctan(camera.width/(2*camera.intrinsics[0,0])))),
+        intrinsics=camera.intrinsics.tolist(),
+        distortion_opencv=camera.specs["RGB180"]["D"].tolist(),
+        optics="SDK RGB180 K/D; undistorted RGB and aligned ideal geometric depth; no stereo noise model",
+        collision_geometry_in_fixed_obstacles=False,
+        fixed_base_world_contact=hardware["workspace"].get("fixed_base_world_contact", False),
+    )
     return load_camera_preparation(dict(
         profile=profile, q_capture=environment["q_capture"], fixed_obstacles=obstacles,
         lab_scene=environment["source"], pick_place_bounds_xy_m=environment["pick_place_bounds_xy_m"],

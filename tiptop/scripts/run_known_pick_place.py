@@ -52,6 +52,7 @@ from tiptop.task_logging import LOG_OWNER_ENV, capture_terminal_log
 from tiptop.task_timing import TaskTimings
 from tiptop.console import timing_line
 from tiptop.serialization import savez_fast
+from tiptop.task_presets import TASK_PRESETS, TaskSettings, prepare_task_environment
 from tiptop.utils import NumpyEncoder
 
 _TASK_SEQUENCE = count(1)
@@ -129,6 +130,8 @@ async def run(args):
     args._background = []
     args._preview = None
     args.output.mkdir(parents=True, exist_ok=True)
+    task_settings = getattr(args, "task_settings", TaskSettings())
+    perception_instruction = task_settings.perception_instruction(args.task)
     cfg = tiptop_cfg()
     cfg.perception.foundation_stereo.url = args.depth_url
     cfg.perception.foundation_pose_url = args.pose_url
@@ -136,10 +139,12 @@ async def run(args):
         raise ValueError("Known-DB baseline uses the existing observed hull path; disable RecGen")
     mode = getattr(args, "perception_mode", None) or cfg.perception.get("mode", "gemini_er")
     if mode == "gemini_er":
-        cfg.experimental.return_in_place = True
+        cfg.experimental.return_in_place = task_settings.preset == "in_place_return"
+        cfg.experimental.pick_place_next_to = False
         sam2_client()
     elif mode != "sam3_reference":
         raise ValueError(f"Unknown perception mode: {mode}")
+    task_settings.validate_perception_mode(mode)
     async with aiohttp.ClientSession() as session:
         timing.phase("reference_readiness")
         if mode == "sam3_reference":
@@ -148,7 +153,7 @@ async def run(args):
 
             if args.active_task:
                 raise ValueError("Reference mode requires a fresh detection, not --active-task")
-            class_id = parse_reference_task(args.task)
+            class_id = parse_reference_task(perception_instruction, allow_pick_only=task_settings.pick_only)
             args._background.append(asyncio.create_task(asyncio.to_thread(prefetch_registered_assets, class_id)))
             await check_reference_health(session, args.sam3_url or cfg.perception.sam3.url)
         args._stage = "observation"
@@ -297,7 +302,7 @@ async def run(args):
             env, _, scene, atoms = await run_perception(
                 session,
                 observation,
-                args.task,
+                perception_instruction,
                 args.output,
                 depth_estimator=depth_without_robot,
                 include_workspace=False,
@@ -305,7 +310,8 @@ async def run(args):
                 grasp_provider="known_db",
                 client=client,
                 active_task=active,
-                in_place_return=True,
+                in_place_return=task_settings.preset == "in_place_return",
+                pick_only=task_settings.pick_only,
                 registered_grasp_from_tcp=grasp_from_tcp,
                 cad_mask_min_iou=getattr(args, "cad_mask_min_iou", 0.75),
                 table_support=table_support,
@@ -343,6 +349,19 @@ async def run(args):
                 client.close()
         timing.phase("perception_output_preparation")
         visual = scene.perception_results
+        task_fixed = hardware["fixed_obstacles"] if hardware else known_fixed
+        env, region = prepare_task_environment(env, scene, task_settings, fixed_obstacles=task_fixed)
+        if region is not None:
+            (args.output / "placement-region.json").write_text(json.dumps(region, cls=NumpyEncoder, indent=2) + "\n")
+        (args.output / "task-settings.json").write_text(
+            json.dumps(dict(task_preset=task_settings.preset, instruction=args.task,
+                            perception_instruction=perception_instruction, placement_region=region),
+                       cls=NumpyEncoder, ensure_ascii=False, indent=2) + "\n")
+        if args._preview is not None and not task_settings.holding_goal:
+            args._preview.placement(region, observation.world_from_cam, frame.intrinsics)
+        elif args._preview is not None and task_settings.fixed_box_present:
+            args._preview.placement(task_settings.box_region(), observation.world_from_cam, frame.intrinsics,
+                                    is_destination=task_settings.preset == "home_drop")
         semantic = json.loads((args.output / "semantic-task.json").read_text())
         name = next(iter(scene.grasps))
         index = next(i for i, box in enumerate(visual["bboxes"]) if box["label"] == name)
@@ -352,7 +371,7 @@ async def run(args):
         Image.fromarray(overlay).save(args.output / "target-overlay.png", compress_level=1)
         status = (
             f"{'Gemini -> SAM2' if mode == 'gemini_er' else 'Reference -> SAM3'} -> Depth -> FoundationPose -> UON DB\n"
-            f"Target: {name}. Original object position selected. Planning pick, lift, hold, release, and home..."
+            f"Target: {name}. Task: {TASK_PRESETS[task_settings.preset]['label']}. Planning complete path and home..."
         )
         timing.phase("camera_display")
         display = io.BytesIO()
@@ -388,6 +407,7 @@ async def run(args):
             output=args.output,
             max_approach_tilt_deg=args.max_approach_tilt_deg,
             planning_settings=getattr(args, "planning_settings", None),
+            task_settings=task_settings,
             **model_options,
         ))
         try:
@@ -452,7 +472,7 @@ async def run(args):
             json.dumps({k: v for k, v in result.items() if k not in {"trace", "calls"}}, ensure_ascii=False), flush=True
         )
         if result.get("success") is False:
-            raise RuntimeError("In-place pick/return verification failed; see execution.json")
+            raise RuntimeError("Pick/place verification failed; see execution.json")
         return dict(status=result.get("status", "completed"), success=result.get("success"), executed=True)
 
 
@@ -716,6 +736,18 @@ def parse_args(argv=None):
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", default="후추통 집고 제자리에 놓아")
+    parser.add_argument("--task-preset", choices=list(TASK_PRESETS), default="in_place_return",
+                        help="Placement task independent of --perception-mode")
+    parser.add_argument("--fixed-box-present", action="store_true", default=TaskSettings().fixed_box_present,
+                        help=argparse.SUPPRESS)  # Legacy positive flag; installed geometry cannot be disabled.
+    parser.add_argument("--release-height-m", type=float,
+                        help="Object bottom above destination top, metres (default: 0); "
+                             "cuTAMP collision clearance also applies; ignored for in-place return")
+    box_defaults = TaskSettings()
+    for name in TaskSettings.__dataclass_fields__:
+        if name.startswith("box_"):
+            parser.add_argument("--" + name.replace("_", "-"), type=float, default=getattr(box_defaults, name),
+                                help="Fixed box geometry in base_link metres")
     parser.add_argument('--worker-socket', help='Submit one task to a persistent local worker (or TIPTOP_TASK_WORKER_SOCKET)')
     parser.add_argument("--camera-url", default="http://127.0.0.1:13345")
     parser.add_argument("--depth-url", default="http://127.0.0.1:13344")
@@ -806,15 +838,6 @@ def parse_args(argv=None):
                         help="Pick-to-lift approach-axis distance in metres (default: 0.05)")
     parser.add_argument("--lift-hold-s", type=float, default=defaults.lift_hold_s,
                         help="Stationary hold above the source before lowering, seconds (default: 1)")
-    for name, description in [
-        ("approach_speed_factor", "travel to the pre-grasp pose"),
-        ("descend_far_speed_factor", "descent from the pre-grasp pose to the lift-height stop"),
-        ("descend_near_speed_factor", "final descent from the lift-height stop to the grasp"),
-        ("lift_speed_factor", "lift along the reversed final descent"),
-        ("home_speed_factor", "return to the captured home joints"),
-    ]:
-        parser.add_argument("--" + name.replace("_", "-"), type=float, default=getattr(defaults, name),
-                            help=f"Speed factor for {description}, in (0,1] (default: {getattr(defaults, name):g})")
     parser.add_argument("--max-wrist-travel-deg", type=float, default=defaults.max_wrist_travel_deg,
                         help="Reject a planned leg whose J4 or J5 moves farther than this from its start, degrees "
                              "(default: 90)")
@@ -857,6 +880,15 @@ def parse_args(argv=None):
     except ValueError as error:
         parser.error(str(error))
     args.perception_mode = args.perception_mode or tiptop_cfg().perception.get("mode", "gemini_er")
+    try:
+        args.task_settings = TaskSettings(preset=args.task_preset, release_height_m=args.release_height_m,
+                                         fixed_box_present=args.fixed_box_present,
+                                         **{name: getattr(args, name) for name in TaskSettings.__dataclass_fields__
+                                            if name.startswith("box_")})
+        args.task_settings.validate_perception_mode(args.perception_mode)
+        args.task_settings.perception_instruction(args.task)
+    except ValueError as error:
+        parser.error(str(error))
     if args.perception_mode == "sam3_reference" and (args.active_task or args.allow_gemini_once):
         parser.error("Reference mode uses neither --active-task nor --allow-gemini-once")
     if not np.isfinite(args.max_approach_tilt_deg) or not 0 <= args.max_approach_tilt_deg <= 90:

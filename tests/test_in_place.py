@@ -34,17 +34,15 @@ def test_boundary_residue_is_removed_only_at_a_stationary_initial_hold():
         stationary_boundaries(raw)
 
 
-def test_approach_home_terminal_tolerance_does_not_relax_the_default():
+def test_terminal_velocity_up_to_the_default_tolerance_is_zeroed_and_more_is_rejected():
     raw = path()
-    raw.velocity[-1, 0] = .0037
-    with pytest.raises(ValueError, match='final'):
-        stationary_boundaries(raw)
-    clean = stationary_boundaries(raw, terminal_velocity_tolerance_rad_s=.004)
+    raw.velocity[-1, 0] = .0047
+    clean = stationary_boundaries(raw)
     assert torch.count_nonzero(clean.velocity[[0, -1]]) == 0
     assert torch.equal(clean.position, raw.position)
-    raw.velocity[-1, 0] = .0041
+    raw.velocity[-1, 0] = .0051
     with pytest.raises(ValueError, match='final'):
-        stationary_boundaries(raw, terminal_velocity_tolerance_rad_s=.004)
+        stationary_boundaries(raw)
 
 
 def test_wrist_travel_counts_only_j4_and_j5_excursion_from_the_start():
@@ -162,13 +160,8 @@ def test_completed_solver_carries_its_actual_target_with_the_descend_path():
         assert torch.equal(value.position, torch.zeros_like(value.position))
 
 
-@pytest.mark.parametrize("overrides", [
-    {},
-    dict(approach_speed_factor=.6, descend_far_speed_factor=.5, descend_near_speed_factor=.4,
-         lift_speed_factor=.7, home_speed_factor=.65),
-    dict(approach_distance_m=.05, descend_near_speed_factor=.7, lift_speed_factor=.5),
-])
-def test_stage_speeds_route_to_each_leg_and_lift_preserves_time_velocity_consistency(overrides, monkeypatch):
+@pytest.mark.parametrize("overrides", [{}, dict(approach_distance_m=.05)])
+def test_every_leg_runs_at_the_fixed_speed_and_lift_preserves_time_velocity_consistency(overrides, monkeypatch):
     from types import SimpleNamespace
     from tiptop.doosan import in_place
     from tiptop.doosan.in_place import make_in_place_solver
@@ -176,13 +169,6 @@ def test_stage_speeds_route_to_each_leg_and_lift_preserves_time_velocity_consist
 
     settings = KnownTaskPlanningSettings(**overrides)
     calls, generated = [], []
-    tolerances = []
-
-    def boundaries(value, **kwargs):
-        tolerances.append(kwargs['terminal_velocity_tolerance_rad_s'])
-        return stationary_boundaries(value, **kwargs)
-
-    monkeypatch.setattr(in_place, 'stationary_boundaries', boundaries)
 
     def result(start, options, end=None):
         q = start.position[-1:].repeat(4, 1)
@@ -211,17 +197,14 @@ def test_stage_speeds_route_to_each_leg_and_lift_preserves_time_velocity_consist
         dict(plan_skeleton=[pick]), dict(q0=torch.zeros(6), grasp=torch.eye(4)), world,
         SimpleNamespace(time_dilation_factor=.7), None, None, dict(object=torch.eye(4)), motion_gen=mg)
     has_far = settings.approach_distance_m > settings.lift_distance_m
-    assert calls == [settings.approach_speed_factor,
-                     *([settings.descend_far_speed_factor] if has_far else []),
-                     settings.descend_near_speed_factor, settings.home_speed_factor]
-    assert tolerances == [.004, *([.0025] if has_far else []), .0025, .004]
+    assert calls == [in_place.SPEED_FACTOR] * (4 if has_far else 3)
     assert [s['label'] for s in steps] == [
         'Pick.approach', 'Pick.descend', 'Pick.close', 'Place.lift', 'Place.hold', 'Place.open', 'Home']
     near = generated[2 if has_far else 1]
     lift = steps[3]
     assert torch.equal(lift['plan'].position, near.position.flip(0))
     assert torch.equal(steps[1]['plan'].position[-len(near.position):], near.position)
-    assert lift['dt'] == pytest.approx(.02 * settings.descend_near_speed_factor / settings.lift_speed_factor)
+    assert lift['dt'] == pytest.approx(.02)
     # Same joint displacement per sample after reversing and retiming; the
     # original descent positions, timing, and raw velocities stay untouched.
     assert float(lift['plan'].velocity[1, 0]) * lift['dt'] == pytest.approx(-.02 * .02)
@@ -229,6 +212,83 @@ def test_stage_speeds_route_to_each_leg_and_lift_preserves_time_velocity_consist
     assert near.velocity[0, 0] == pytest.approx(.003)
     assert steps[4]['dt'] * len(steps[4]['plan'].position) == settings.lift_hold_s
     assert torch.equal(steps[-1]['plan'].position[-1], torch.zeros(6))
+
+
+def run_home_drop(monkeypatch, order):
+    """Plan one home_drop particle against fakes; `order` names each plan_single call in sequence."""
+    from types import SimpleNamespace
+    from tiptop.doosan import in_place
+    from tiptop.doosan.in_place import make_in_place_solver
+    from tiptop.doosan.known_task import KnownTaskPlanningSettings
+
+    events, starts, constrained = [], {}, {}
+
+    def result(label, start, end=None):
+        q = start.position[-1:].repeat(4, 1)
+        end = q[0] + torch.tensor([.02, 0, 0, 0, 0, 0]) if end is None else end
+        q[2], q[3] = (q[0] + end) / 2, end
+        v = torch.zeros_like(q)
+        v[2, 0] = .02
+        events.append(label)
+        starts[label] = start.position[-1:].clone()
+        return SimpleNamespace(success=True, interpolation_dt=.02, status=None,
+                               get_interpolated_plan=lambda: JointState(position=q, velocity=v))
+
+    def plan_single(start, goal, options):
+        label = next(calls)
+        constrained[label] = options.pose_cost_metric is not None
+        if label == "lift-failed":
+            events.append(label)
+            return SimpleNamespace(success=False, status=SimpleNamespace(name="INVALID_START_STATE_WORLD_COLLISION"))
+        return result(label, start)
+
+    noop = lambda *a, **k: None
+    monkeypatch.setattr(in_place, "attach_object_at_grasp", lambda *a, **k: events.append("attach"))
+    calls = iter(order)
+    kinematics_config = SimpleNamespace(
+        get_link_spheres=lambda name: torch.ones(2, 4),
+        detach_object=lambda name: events.append("detach"),
+        attach_object=lambda **k: events.append("reattach"),
+    )
+    mg = SimpleNamespace(
+        detach_object_from_robot=noop,
+        world_coll_checker=SimpleNamespace(enable_obstacle=noop),
+        world_collision=SimpleNamespace(update_obstacle_pose=noop),
+        kinematics=SimpleNamespace(kinematics_config=kinematics_config),
+        plan_single=plan_single,
+        plan_single_js=lambda start, goal, options: result("home", start, goal.position[0]),
+    )
+    world = SimpleNamespace(device=torch.device("cpu"), tool_from_ee=torch.eye(4),
+                            tensor_args=SimpleNamespace(to_device=lambda x: torch.tensor(x)))
+    pick = SimpleNamespace(operator=SimpleNamespace(name="Pick"), values=["object", "grasp", None])
+    steps = make_in_place_solver(KnownTaskPlanningSettings(), drop_at_home=True)(
+        dict(plan_skeleton=[pick]), dict(q0=torch.zeros(6), grasp=torch.eye(4)), world,
+        SimpleNamespace(time_dilation_factor=.7), None, None, dict(object=torch.eye(4)), motion_gen=mg)
+    return steps, events, starts, constrained
+
+
+LABELS = ["Pick.approach", "Pick.descend", "Pick.close", "Place.lift", "Home", "Place.open"]
+
+
+def test_home_drop_descends_in_one_leg_and_lifts_with_the_object_attached(monkeypatch):
+    steps, events, starts, constrained = run_home_drop(monkeypatch, ["approach", "descend", "lift"])
+    # One descend, the object joins the robot at the grasp, the lift is a new straight plan, then Home.
+    assert events == ["approach", "descend", "attach", "lift", "home"]
+    assert [s["label"] for s in steps] == LABELS
+    assert constrained["lift"]
+    assert torch.equal(starts["lift"], steps[1]["plan"].position[-1:])
+    assert torch.equal(starts["home"], steps[3]["plan"].position[-1:])
+    assert torch.equal(steps[4]["plan"].position[-1], torch.zeros(6))
+
+
+def test_home_drop_replans_the_lift_without_the_object_when_the_grasp_pose_collides(monkeypatch):
+    steps, events, starts, constrained = run_home_drop(
+        monkeypatch, ["approach", "descend", "lift-failed", "lift"])
+    # Same fallback as cuTAMP's Place: detach, plan the lift unconstrained, reattach, then carry on with the object.
+    assert events == ["approach", "descend", "attach", "lift-failed", "detach", "lift", "reattach", "home"]
+    assert [s["label"] for s in steps] == LABELS
+    assert constrained["lift-failed"] and not constrained["lift"]
+    assert torch.equal(starts["lift"], steps[1]["plan"].position[-1:])
 
 
 def test_simulator_accepts_source_return_without_transport_but_requires_table_contact():

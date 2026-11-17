@@ -227,6 +227,8 @@ class TaskPreview:
                         self.state["status"] = "인식 완료 · 최종 경로 계획 대기"
                 elif event == "planning":
                     self.state["feasible_ids"] = data["supplied_candidate_ids"]
+                elif event == "placement":
+                    self.state["placement"] = data
                 elif event == "error":
                     self.state["status"] = str(data["message"])
                 if event not in self.state["ready"]:
@@ -273,6 +275,42 @@ class TaskPreview:
             self.update("obstacles", data)
         except Exception as error:
             _log.warning("Perception viewer obstacle scene skipped: %s", error)
+
+    def placement(self, region, world_from_cam, intrinsics, *, is_destination=True):
+        """Show the configured physical box and release plane in this observation."""
+        try:
+            center, half = np.asarray(region["center_xy_m"]), np.asarray(region["size_xy_m"]) / 2
+            xy = center + np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]]) * half
+            top, release = region["support_z_m"], region["release_bottom_z_m"]
+            bottom = region.get("box", {}).get("box_bottom_z_m", top)
+            layers = {key: np.column_stack((xy, np.full(4, z)))
+                      for key, z in (("bottom", bottom), ("top", top), ("release", release))}
+            camera = np.linalg.inv(np.asarray(world_from_cam))
+
+            def project(points):
+                points = points @ camera[:3, :3].T + camera[:3, 3]
+                if np.any(points[:, 2] <= .001):
+                    raise ValueError("Placement is behind the RGB camera")
+                pixels = points @ np.asarray(intrinsics).T
+                return (pixels[:, :2] / pixels[:, 2:]).tolist()
+
+            self.update("placement", dict(region=region, is_destination=is_destination,
+                                           **{key: project(points) for key, points in layers.items()}))
+            if region["source"] == "fixed_box":
+                vertices = np.concatenate([layers["bottom"], layers["top"]])
+                faces = [[0,1,2], [0,2,3], [4,6,5], [4,7,6], [0,4,5], [0,5,1],
+                         [1,5,6], [1,6,2], [2,6,7], [2,7,3], [3,7,4], [3,4,0]]
+                obstacle = dict(label=region["destination"], class_id="고정 박스", points=[],
+                                observed_points=0, vertices=vertices.tolist(), faces=faces,
+                                color=[120,212,224], collision_mesh=True, source="configured")
+                scene = dict(self.state.get("obstacle_scene", {}))
+                scene["objects"] = [obj for obj in scene.get("objects", []) if obj["label"] != obstacle["label"]] + [obstacle]
+                scene.setdefault("support_z_m", bottom)
+                scene["camera"] = rgb_camera_view(world_from_cam, intrinsics, self.state["width"], self.state["height"])
+                (self.directory / "obstacles.json").write_text(json.dumps(scene, ensure_ascii=False, allow_nan=False))
+                self.update("obstacles", scene)
+        except Exception as error:
+            _log.warning("Placement preview skipped: %s", error)
 
     def grasps(self, data, world_from_cam, intrinsics, *, max_tilt_deg=10, spheres=None):
         """Retain DB candidates for optional inspection; they are never the final grasp."""
@@ -509,6 +547,17 @@ def preview_saved_task(output):
                                               grounded_atoms=semantic.get("grounded_atoms", [])))
     plan_path = output / "plan.json"
     plan = json.loads(plan_path.read_text()) if plan_path.is_file() else None
+    region_file = output / "placement-region.json"
+    if region_file.is_file():
+        region = json.loads(region_file.read_text())
+        if region.get("source") in {"fixed_box", "perceived_surface"}:
+            preview.placement(region, observation["world_from_cam"], observation["intrinsics"])
+        elif plan and plan.get("task_settings", {}).get("fixed_box_present"):
+            from tiptop.task_presets import TaskSettings
+
+            settings = TaskSettings(**plan["task_settings"])
+            preview.placement(settings.box_region(), observation["world_from_cam"], observation["intrinsics"],
+                              is_destination=False)
     pose_path = output / "registered-pose.json"
     region_path = output / "placement-region.json"
     if pose_path.is_file() and region_path.is_file():
@@ -520,8 +569,9 @@ def preview_saved_task(output):
             entry = registered_object(registered["class_id"])
             pose = np.asarray(registered["pose"]["world_from_cad"])
             vertices = np.asarray(trimesh.load(entry["cad"], force="mesh", process=False).vertices) * entry["cad_scale_to_m"]
+            region = json.loads(region_path.read_text())
             preview.side_scene(vertices @ pose[:3, :3].T + pose[:3, 3],
-                               json.loads(region_path.read_text())["support_z_m"], observation["world_from_cam"])
+                               region.get("source_support_z_m", region["support_z_m"]), observation["world_from_cam"])
         except Exception as error:
             _log.warning("Saved side scene unavailable: %s", error)
     if pose_path.is_file():

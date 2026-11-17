@@ -24,7 +24,7 @@ def test_clear_reference_and_showcase_poses(planner):
     from curobo.types.base import TensorDeviceType
     from curobo.types.state import JointState
     motion, _ = planner
-    q = np.radians([5, -5, 5, 2.5, 2.5, 2.5])
+    q = np.radians([5, -5, 5, 2.5, 12.5, 2.5])
     for positions in [np.zeros(6), q, q + np.radians([60, -30, 40, 15, -15, 25])]:
         valid, reason = motion.check_start_state(JointState.from_position(
             TensorDeviceType().to_device(positions[None])))

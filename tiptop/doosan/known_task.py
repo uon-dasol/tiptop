@@ -31,11 +31,6 @@ class KnownTaskPlanningSettings:
     approach_distance_m: float = 0.15
     lift_distance_m: float = 0.05
     lift_hold_s: float = 1.0
-    approach_speed_factor: float = 0.9
-    descend_far_speed_factor: float = 0.7
-    descend_near_speed_factor: float = 0.7
-    lift_speed_factor: float = 0.7
-    home_speed_factor: float = 0.9
     max_wrist_travel_deg: float = 90.0
     min_table_clearance_m: float = 0.010
     min_engagement_depth_m: float = 0.020
@@ -43,9 +38,6 @@ class KnownTaskPlanningSettings:
     robot_world_tolerance_m: float = 0.005  # summed overlap depth of robot spheres into obstacles that cuTAMP accepts
 
     def __post_init__(self):
-        for name, value in asdict(self).items():
-            if name.endswith("_speed_factor") and (not np.isfinite(value) or not 0 < value <= 1):
-                raise ValueError(f"{name} must be finite and in (0, 1]")
         values = [value for name, value in asdict(self).items() if name != "min_engagement_depth_m"]
         if not np.isfinite(values).all() or min(values) <= 0:
             raise ValueError("Planning time, lift and tolerances must be finite and positive")
@@ -64,6 +56,63 @@ def log_candidate_stage(tag, label, before, after, seconds=None, note="", *, eno
     kind = "fail" if after == 0 else "warn" if after < enough else "ok"
     timing = "" if seconds is None else f" · {seconds:.2f}s"
     log_tag(tag, f"{label}  {before:,} → {after:,} (−{before - after:,}){note}{timing}", kind)
+
+
+FINGER_SYMMETRY_RAD = 2 * math.pi / 3  # Fingers repeat every 120 degrees about the TCP z axis
+
+
+def z_rotations(angles):
+    """Homogeneous rotations about z for each angle in radians."""
+    angles = np.asarray(angles, float)
+    matrices = np.tile(np.eye(4), (len(angles), 1, 1))
+    cos, sin = np.cos(angles), np.sin(angles)
+    matrices[:, 0, 0], matrices[:, 0, 1], matrices[:, 1, 0], matrices[:, 1, 1] = cos, -sin, sin, cos
+    return matrices
+
+
+def j6_symmetry_shifts(j6, j6_limits):
+    """Multiples of the finger symmetry that move each J6 value closest to the middle of its limits."""
+    neutral = float(np.mean(j6_limits))
+    return -np.round((np.asarray(j6, float) - neutral) / FINGER_SYMMETRY_RAD) * FINGER_SYMMETRY_RAD
+
+
+def turn_grasps(grasps, angles):
+    """Turn each grasp about its own z axis by the matching angle in radians, on the grasps' device and dtype."""
+    import torch
+
+    grasps = torch.as_tensor(grasps)
+    return grasps @ torch.as_tensor(z_rotations(angles), dtype=grasps.dtype, device=grasps.device)
+
+
+def first_successful_solutions(solved):
+    """First successful seed's joint solution per goal, as the screened-IK reuse selects it."""
+    import torch
+
+    rows = torch.arange(len(solved.solution), device=solved.solution.device)
+    return solved.solution[rows, solved.success.to(torch.int32).argmax(dim=1)]
+
+
+def fold_j6_by_symmetry(ik, solved, j6_limits):
+    """Shift each goal's J6 by multiples of the finger symmetry toward the middle of `j6_limits`.
+
+    J6 is the TCP z axis, so turning a grasp by 120 degrees only changes J6. The J6 window spans 360 degrees, so IK
+    always lands inside it. A shift is kept only if the turned gripper body is still feasible. The first successful
+    seed's solutions in `solved` are shifted in place; returns the applied shifts in radians.
+    """
+    import torch
+    from curobo.types.state import JointState
+
+    q = first_successful_solutions(solved)
+    shifts = j6_symmetry_shifts(q[:, 5].cpu().numpy(), j6_limits)
+    shifts_tensor = torch.as_tensor(shifts, dtype=q.dtype, device=q.device)
+    folded = q.clone()
+    folded[:, 5] += shifts_tensor
+    state = JointState.from_position(folded, joint_names=list(ik.joint_names))
+    free = ik.check_constraints(state).feasible.reshape(len(q), -1).all(dim=1)
+    keep = free & solved.success.any(dim=1)
+    shifts = np.where(keep.cpu().numpy(), shifts, 0.0)
+    solved.solution[:, :, 5] += torch.as_tensor(shifts, dtype=q.dtype, device=q.device)[:, None]
+    return shifts
 
 
 def approach_tilt_mask(world_from_tcp, max_tilt_deg=3.0):
@@ -106,6 +155,7 @@ def plan_known_task(
     try_feasible_first: bool = True,
     reuse_planners: bool = True,
     unique_goals_first: bool = True,
+    task_settings=None,
 ):
     import cutamp.algorithm as algorithm
     import cutamp.tamp_world as tamp_world
@@ -133,11 +183,15 @@ def plan_known_task(
     from tiptop.perception.cad_cache import load_cad_mesh
     from tiptop.perception.known_objects import registered_object
     from tiptop.perception.placement import table_support_z
-    from tiptop.doosan.in_place import make_in_place_solver, source_region, validate_in_place_plan
+    from tiptop.doosan.in_place import SPEED_FACTOR, make_in_place_solver, source_region, validate_in_place_plan
+    from tiptop.doosan.home_drop import run_home_drop, validate_home_drop_plan
     from tiptop.planning import run_planning, serialize_plan
+    from tiptop.task_presets import FIXED_BOX_NAME, TaskSettings, prepare_task_environment
+    from tiptop.doosan.place_task import cad_bottom_correction, placement_height_context, run_standard_place, validate_place_plan
     from tiptop.utils import NumpyEncoder
 
     settings = KnownTaskPlanningSettings() if planning_settings is None else planning_settings
+    task = TaskSettings() if task_settings is None else task_settings
     started = time.perf_counter()
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -197,20 +251,28 @@ def plan_known_task(
 
     visual = scene.perception_results
     table = scene.table_cuboid
-    env = copy.deepcopy(env)
-    # The task goal is holding the identified object; our motion adapter then
-    # returns it along the checked lift path, rather than sampling a new place.
-    from cutamp.tamp_domain import Holding
-
-    env.goal_state = frozenset({Holding.ground(name)})
-    env.type_to_objects["Surface"] = [table]
+    env, region = prepare_task_environment(env, scene, task, fixed_obstacles=fixed_obstacles)
     obj = next(item for item in env.movables if item.name == name)
     sampled = sample_greedy_surface_spheres(obj, n_spheres=32, sphere_radius=0.003)
     cad_world = np.asarray(mesh.vertices) @ pose[:3, :3].T + pose[:3, 3]
     table_bounds = (np.asarray(table.pose[:3]) + np.array([-.5, .5])[:, None]*np.asarray(table.dims))
-    region = visual.get("placement_region")
-    if not region or region.get("source") != "in_place_return":
+    if task.holding_goal and (not region or region.get("source") != "in_place_return"):
         region = source_region(table_bounds, cad_world)
+    height_by_surface = {}
+    if not task.holding_goal:
+        from scipy.spatial.transform import Rotation
+
+        object_pose = np.asarray(obj.pose)
+        world_from_object = np.eye(4)
+        world_from_object[:3, :3] = Rotation.from_quat(object_pose[[4, 5, 6, 3]]).as_matrix()
+        world_from_object[:3, 3] = object_pose[:3]
+        correction = cad_bottom_correction(sampled.cpu().numpy(), world_from_object, pose, hull.vertices)
+        # If a sampled sphere extends below the CAD, preserve upstream's
+        # collision clearance for zero-height placing rather than forcing it
+        # into the box. Positive release heights use the complete CAD bottom.
+        height_by_surface[region["destination"]] = max(0., task.release_height_m + correction)
+        region["cad_bottom_correction_m"] = correction
+        region["sampled_support_height_offset_m"] = height_by_surface[region["destination"]]
     visual["placement_region"] = region
 
     # Keep the original partial-hull Mesh in both the IK and motion worlds.
@@ -262,20 +324,36 @@ def plan_known_task(
         return ik
     ik, ik_runtime = cached_planner('ik', model_key, build_ik,
         lambda value: reset_ik(value, copy.deepcopy(static_world)), enabled=reuse_planners)
+    joint_limits = ik.kinematics.kinematics_config.joint_limits.position.cpu().numpy()
     if fixed_base_world_contact:
         from tiptop.doosan.fixed_base_contact import allow_fixed_base_mounting_contact, check_fixed_base_clearance
 
         # Only tabletop mounting contact is intentional. Other static geometry
         # must clear the stationary base before omitting its constant world cost.
         check_fixed_base_clearance(ik.kinematics, observation.q_init,
-            [box for box in fixed_obstacles if box.name != "configured_full_table"])
+            [box for box in fixed_obstacles if box.name != "configured_full_table"]
+            + [box for box in env.statics if box.name.startswith(FIXED_BOX_NAME)])
     batch = np.asarray(screened)
     ik_started = time.perf_counter()
-    screened_goals = Pose.from_matrix(ik.tensor_args.to_device(tcp[batch]))
-    solved = ik.solve_batch(screened_goals, return_seeds=4)
+    tcp_batch = tcp[batch]
+    solved = ik.solve_batch(Pose.from_matrix(ik.tensor_args.to_device(tcp_batch)), return_seeds=4)
+    ik_success = solved.success.any(dim=1)
+    q_first = first_successful_solutions(solved)
+    shifts = fold_j6_by_symmetry(ik, solved, joint_limits[:, 5])
+    tcp_batch = tcp_batch @ z_rotations(shifts)
+    screened_goals = Pose.from_matrix(ik.tensor_args.to_device(tcp_batch))
     reusable_ik = ScreenedIKReuse(ik, screened_goals, solved) if reuse_screened_ik else None
-    feasible = batch[solved.success.any(dim=1).cpu().numpy()]
+    solved_rows = ik_success.cpu().numpy()
+    feasible = batch[solved_rows]
     ik_seconds = time.perf_counter() - ik_started
+    if solved_rows.any():
+        neutral = float(np.mean(joint_limits[:, 5]))
+        before = np.degrees(np.abs(q_first[:, 5].cpu().numpy()[solved_rows] - neutral)).max()
+        after = np.degrees(np.abs(q_first[:, 5].cpu().numpy()[solved_rows] + shifts[solved_rows] - neutral)).max()
+        log_tag("IK", f"J6 120° 접기: {int(solved_rows.sum())}개 중 {int((shifts != 0).sum())}개 조정 · "
+                f"중립 대비 최대 편차 {before:.0f}° → {after:.0f}°", "info")
+    grasp_shifts = np.zeros(len(tcp))
+    grasp_shifts[batch] = shifts
     # Angle, geometry and IK screening preserve the DB's descending score order.
     selected = feasible[:settings.num_particles]
     log_candidate_stage("IK", "⑤ 충돌 없는 IK 해", len(batch), len(feasible), ik_seconds, enough=enough)
@@ -296,7 +374,10 @@ def plan_known_task(
         lambda value: None, enabled=reuse_planners)
     kin = container.kin_model
     grasps = {
-        name: dict(grasps_obj=supplied["grasps_obj"][selected], confidences_pt=supplied["confidences_pt"][selected])
+        name: dict(
+            grasps_obj=turn_grasps(supplied["grasps_obj"][selected], grasp_shifts[selected]),
+            confidences_pt=supplied["confidences_pt"][selected],
+        )
     }
     config = TAMPConfiguration(
         robot="m1013_uon",
@@ -316,7 +397,7 @@ def plan_known_task(
         coll_n_spheres=32,
         coll_sphere_radius=0.003,
         placement_check="obb",
-        time_dilation_factor=settings.approach_speed_factor,
+        time_dilation_factor=SPEED_FACTOR,
     )
     robot_cfg = copy.deepcopy(cfg)
     robot_cfg["robot_cfg"]["kinematics"]["extra_collision_spheres"]["attached_object"] = 32
@@ -362,13 +443,19 @@ def plan_known_task(
                           "이 순서로 모션 계획을 시도해 처음 성공하면 멈춥니다", "ok")
         return particles
 
-    in_place_solver = make_in_place_solver(settings)
+    if task.preset == "in_place_return":
+        solver = make_in_place_solver(settings)
+    elif task.preset == "home_drop":
+        solver = partial(run_home_drop, make_in_place_solver(settings, drop_at_home=True), task.drop_region(), pose,
+                         hull.vertices, settings.motion_position_tolerance_m + .002)
+    else:
+        solver = partial(run_standard_place, algorithm.solve_curobo, settings, region, pose, hull.vertices)
     def logged_solver(*args, **kwargs):
         motion_trials["count"] += 1
         label = f"{motion_trials['count']}/{motion_trials['total']}번째 입자"
         started = time.perf_counter()
         try:
-            result = in_place_solver(*args, **kwargs)
+            result = solver(*args, **kwargs)
         except MotionPlanningError as error:
             log_tag("Motion", f"{label} 실패 · {error} · {time.perf_counter() - started:.2f}s", "warn")
             raise
@@ -390,6 +477,7 @@ def plan_known_task(
         patch.object(algorithm, "get_ranked_satisfying_particles", rank_particles),
         patch.object(tamp_world, "sample_greedy_surface_spheres", cached_sample),
         patch.object(tamp_world, "get_world_collision_cost", world_cost if fixed_base_world_contact else original_world_cost),
+        placement_height_context(height_by_surface),
     ):
         plan, elapsed, failure, search = run_known_planning(
             partial(run_planning, robot_world_tolerance=settings.robot_world_tolerance_m),
@@ -404,7 +492,7 @@ def plan_known_task(
             try_feasible_first=try_feasible_first,
         )
     if plan is None:
-        raise RuntimeError(f"Existing cuTAMP found no complete in-place pick/return plan: {failure}")
+        raise RuntimeError(f"Existing cuTAMP found no complete {task.preset} plan: {failure}")
     serialized = serialize_plan(plan, observation.q_init)
     for step in plan:
         if step.get("label") == "Pick.descend" and "grasp_target_world_from_tcp" in step:
@@ -413,7 +501,8 @@ def plan_known_task(
     serialized.update(
         robot="m1013_uon",
         placement_region=region,
-        task_mode="in_place_return",
+        task_mode=task.preset,
+        task_settings=asdict(task),
         returns_to_start=True,
         class_id=entry["class_id"],
         max_approach_tilt_deg=float(max_approach_tilt_deg),
@@ -431,9 +520,19 @@ def plan_known_task(
         state = kin.get_state(tensor.to_device(np.asarray(q)[None]))
         return state.ee_pose.get_matrix().cpu().numpy()[0]
 
-    return_check = validate_in_place_plan(serialized, tcp_at,
-        lift_distance_m=settings.lift_distance_m, position_tolerance_m=settings.motion_position_tolerance_m)
-    serialized["in_place_return_check"] = return_check
+    if task.preset == "in_place_return":
+        check_name = "in_place_return_check"
+        return_check = validate_in_place_plan(serialized, tcp_at,
+            lift_distance_m=settings.lift_distance_m, position_tolerance_m=settings.motion_position_tolerance_m)
+    elif task.preset == "home_drop":
+        check_name = "home_drop_check"
+        return_check = validate_home_drop_plan(serialized, tcp_at, pose, hull.vertices, task.drop_region(),
+            lift_distance_m=settings.lift_distance_m, position_tolerance_m=settings.motion_position_tolerance_m)
+    else:
+        check_name = "placement_check"
+        return_check = validate_place_plan(serialized, tcp_at, pose, hull.vertices, region,
+                                          position_tolerance_m=settings.motion_position_tolerance_m)
+    serialized[check_name] = return_check
     collision_registration = dict(
         surrounding_obstacles=visual.get("surrounding_obstacles", True),
         perceived_collision_labels=sorted(
@@ -443,7 +542,9 @@ def plan_known_task(
     serialized.update(collision_registration)
     report = dict(
         **collision_registration,
-        in_place_return_check=return_check,
+        **{check_name: return_check},
+        task_mode=task.preset,
+        task_settings=asdict(task),
         planning_seconds=elapsed,
         planning_total_seconds=time.perf_counter() - started,
         candidate_screening_seconds=screening_seconds,
@@ -476,7 +577,7 @@ def plan_known_task(
         supplied_approach_tilt_deg=np.rad2deg(np.arccos(np.clip(-tcp[selected, 2, 2], -1, 1))).tolist(),
         max_motion_refine_attempts=None,
         max_approach_tilt_deg=float(max_approach_tilt_deg),
-        configured_fixed_obstacles=len(fixed_obstacles),
+        configured_fixed_obstacles=len(fixed_obstacles) + int(task.fixed_box_present),
         motion_planning_timeout_s=settings.motion_timeout_s,
         sequence=[step["label"] for step in plan],
         executor_calls=verify_gateway_contract(serialized),

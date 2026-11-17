@@ -36,3 +36,4 @@ pyzed*.whl
 # temp
 docs/analysis/
 scripts/analysis/
+Log/

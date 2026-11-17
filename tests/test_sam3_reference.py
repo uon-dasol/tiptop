@@ -50,6 +50,10 @@ def test_unsupported_instruction_fails_without_guessing(instruction):
         reference.parse_reference_task(instruction)
 
 
+def test_fixed_destination_backend_can_explicitly_request_pick_only():
+    assert reference.parse_reference_task("black_pepper_shaker 집어", allow_pick_only=True) == "black_pepper_shaker"
+
+
 def packet(h=4, w=6):
     masks = np.zeros((2, 1, h, w), bool)
     masks[0, 0, :2, :3] = True

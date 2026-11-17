@@ -165,12 +165,16 @@ async def check_readiness(args):
         await collect("hardware_profile", hardware)
 
     mode = args.perception_mode
+    from tiptop.task_presets import TaskSettings
+
+    task_settings = getattr(args, "task_settings", TaskSettings())
+    perception_instruction = task_settings.perception_instruction(args.task)
 
     async def catalog():
         from tiptop.perception.sam3_reference import parse_reference_task
 
         class_ids = (
-            [parse_reference_task(args.task)]
+            [parse_reference_task(perception_instruction, allow_pick_only=task_settings.pick_only)]
             if mode == "sam3_reference"
             else [row["class_id"] for row in load_catalog()["objects"]]
         )
@@ -214,7 +218,7 @@ async def check_readiness(args):
                     session,
                     url.rstrip("/") + "/reference",
                     params=dict(
-                        class_id=parse_reference_task(args.task),
+                        class_id=parse_reference_task(perception_instruction, allow_pick_only=task_settings.pick_only),
                         scene=args.reference_scene or cfg.perception.sam3.reference_scene,
                     ),
                 )

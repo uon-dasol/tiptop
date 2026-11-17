@@ -297,16 +297,6 @@ def test_cli_passes_requested_planning_limits_before_running_task(monkeypatch):
             "0.06",
             "--lift-hold-s",
             "1.5",
-            "--approach-speed-factor",
-            "0.6",
-            "--descend-far-speed-factor",
-            "0.5",
-            "--descend-near-speed-factor",
-            "0.4",
-            "--lift-speed-factor",
-            "0.7",
-            "--home-speed-factor",
-            "0.65",
         ],
     )
     runner.main()
@@ -317,17 +307,8 @@ def test_cli_passes_requested_planning_limits_before_running_task(monkeypatch):
     assert settings.approach_distance_m == .2
     assert settings.lift_distance_m == .06
     assert settings.lift_hold_s == 1.5
-    assert settings.approach_speed_factor == .6
-    assert settings.descend_far_speed_factor == .5
-    assert settings.descend_near_speed_factor == .4
-    assert settings.lift_speed_factor == .7
-    assert settings.home_speed_factor == .65
     # Invalid height budgets fail before entering perception or planning.
     monkeypatch.setattr(sys, "argv", ["run_known_pick_place", "--lift-distance-m", "0.003"])
-    with pytest.raises(SystemExit) as error:
-        runner.main()
-    assert error.value.code == 2 and len(captured) == 1
-    monkeypatch.setattr(sys, "argv", ["run_known_pick_place", "--lift-speed-factor", "1.01"])
     with pytest.raises(SystemExit) as error:
         runner.main()
     assert error.value.code == 2 and len(captured) == 1

@@ -184,18 +184,6 @@ def test_planning_settings_reject_invalid_or_inconsistent_limits(options):
         KnownTaskPlanningSettings(**options)
 
 
-@pytest.mark.parametrize("name", [
-    "approach_speed_factor", "descend_far_speed_factor", "descend_near_speed_factor",
-    "lift_speed_factor", "home_speed_factor",
-])
-@pytest.mark.parametrize("value", [0, 1.01, float("nan"), float("inf")])
-def test_stage_speed_factors_require_positive_finite_ratios_at_most_one(name, value):
-    from tiptop.doosan.known_task import KnownTaskPlanningSettings
-
-    with pytest.raises(ValueError, match=name):
-        KnownTaskPlanningSettings(**{name: value})
-
-
 def test_engagement_depth_is_measured_from_the_posed_cad_top_and_zero_disables_the_bound():
     from tiptop.doosan.known_task import KnownTaskPlanningSettings, engagement_depth_m
 
