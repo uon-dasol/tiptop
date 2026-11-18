@@ -1,5 +1,7 @@
 """Small CPU checks for the new provider boundary and observed placement goal."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -325,3 +327,72 @@ def test_tiptop_progress_info_is_hidden_but_timing_lines_warnings_and_other_logg
         assert keep(record("tiptop.planning", logging.INFO, text))
     assert keep(record("tiptop.execute_plan", logging.WARNING, "Executing step failed"))
     assert keep(record("cutamp.algorithm", logging.INFO, "Found plan with 7 steps"))
+
+
+def test_selected_db_row_is_found_by_position_and_axis_even_when_turned_by_the_finger_symmetry(tmp_path):
+    import json
+
+    import numpy as np
+
+    from tiptop.doosan.known_task import selected_db_row
+
+    rows = [dict(target_width=w, score=s, target_joint_pos=dict(start=dict(spinner_joint=.1), end=dict(spinner_joint=e)))
+            for w, s, e in [(.058, .5, 1.3), (.145, 1., 1.0), (.087, 1., 1.1)]]
+    db = tmp_path / "db.json"
+    db.write_text(json.dumps(dict(metadata={}, data=rows)))
+    candidates = np.tile(np.eye(4), (3, 1, 1))
+    candidates[:, 0, 3] = [0, .05, .10]
+    turn = np.radians(120)
+    rotation = np.eye(4)
+    rotation[:2, :2] = [[np.cos(turn), -np.sin(turn)], [np.sin(turn), np.cos(turn)]]
+    target = candidates[1] @ rotation
+    found = selected_db_row(db, [7, 2, 0], candidates, target)
+    assert found["row_index"] == 2 and found["target_width_m"] == .087 and found["spinner_end_rad"] == 1.1
+    assert abs(found["symmetry_turn_deg"] - 120) < 1e-6 and found["position_error_m"] == 0
+    moved = target.copy()
+    moved[0, 3] += .01
+    assert selected_db_row(db, [7, 2, 0], candidates, moved)["row_index"] is None
+
+
+def test_every_object_closes_with_the_listed_current_or_the_default(tmp_path):
+    import json
+
+    from tiptop.object_catalog import grasp_effort_counts, load_catalog
+
+    path = tmp_path / "params.json"
+    path.write_text(json.dumps({"default": {"effort_counts": 50}, "ice_pack": {"effort_counts": 70}}))
+    assert grasp_effort_counts("ice_pack", path) == 70 and grasp_effort_counts("not_listed", path) == 50
+    path.write_text(json.dumps({"default": {"effort_counts": 0}}))
+    with pytest.raises(ValueError, match="positive integer"):
+        grasp_effort_counts("ice_pack", path)
+    listed = set(json.loads((Path(__file__).resolve().parents[1] / "tiptop/config/grasp_params.json").read_text()))
+    assert listed - {"default"} <= {entry["class_id"] for entry in load_catalog()["objects"]}
+
+
+def test_the_executor_passes_the_closing_current_only_when_the_plan_names_one():
+    from tiptop.execute_plan import execute_cutamp_plan
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def close_gripper(self, **kwargs):
+            self.calls.append(kwargs)
+            return dict(success=True)
+
+    for step, expected in [(dict(type="gripper", label="Pick.close", action="close", effort_counts=70), dict(speed=1.0, effort_counts=70)),
+                           (dict(type="gripper", label="Pick.close", action="close"), dict(speed=1.0))]:
+        client = Client()
+        execute_cutamp_plan([step], client)
+        assert client.calls == [expected]
+
+
+def test_the_gateway_client_sends_the_closing_current_only_when_given():
+    from tiptop.doosan.client import DoosanUONClient
+
+    client = DoosanUONClient()
+    sent = []
+    client._request = lambda path, payload=None, timeout=10.0: sent.append((path, payload)) or dict(success=True)
+    client.close_gripper()
+    client.close_gripper(effort_counts=70)
+    assert "effort_counts" not in sent[0][1] and sent[1][1]["effort_counts"] == 70

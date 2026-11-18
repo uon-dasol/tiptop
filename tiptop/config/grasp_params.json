@@ -1,0 +1,53 @@
+{
+  "default": {
+    "effort_counts": 50
+  },
+  "black_pepper_shaker": {
+    "effort_counts": 300
+  },
+  "car_leather_conditioner_bottle": {
+    "effort_counts": 200
+  },
+  "disney_mickey_handled_dipper": {
+    "effort_counts": 200
+  },
+  "double_sided_rectangular_scrubber": {
+    "effort_counts": 10
+  },
+  "pp_handed_cup": {
+    "effort_counts": 200
+  },
+  "spam_classic_20G_can": {
+    "effort_counts": 300
+  },
+  "stain_remover_gel": {
+    "effort_counts": 200
+  },
+  "toy_story_pp_storage_container": {
+    "effort_counts": 300
+  },
+  "ice_pack": {
+    "effort_counts": 200
+  },
+  "chair_leg_caps": {
+    "effort_counts": 50
+  },
+  "cotton_rope_yarn": {
+    "effort_counts": 100
+  },
+  "dumbbell_dog_squeaky_toy": {
+    "effort_counts": 100
+  },
+  "dust_air_blower_pump": {
+    "effort_counts": 10
+  },
+  "fish_shaped_pet_latex_toy": {
+    "effort_counts": 10
+  },
+  "homestar_mold_remover_paste": {
+    "effort_counts": 300
+  },
+  "pat_and_mat_doll": {
+    "effort_counts": 100
+  }
+}

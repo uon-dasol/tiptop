@@ -7,6 +7,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "tiptop/config/known_objects.json"
 DEMO_OBJECTS = ROOT / "tiptop/config/demo_objects.json"
+GRASP_PARAMS = ROOT / "tiptop/config/grasp_params.json"
+
+
+def grasp_effort_counts(class_id, path=GRASP_PARAMS):
+    """Closing current limit (motor current counts, not newtons) for one object; objects not listed use `default`."""
+    params = json.loads(Path(path).read_text())
+    value = params.get(class_id, params["default"])["effort_counts"]
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"effort_counts of {class_id} must be a positive integer, got {value!r}")
+    return value
 
 
 def demo_order(path=DEMO_OBJECTS):

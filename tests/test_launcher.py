@@ -262,6 +262,40 @@ def test_object_list_follows_the_catalog_order(viewer):
     assert objects[0]["name_ko"] == "후추통" and all(item["name_ko"] for item in objects)
 
 
+def test_task_log_endpoint_returns_the_formatted_rows_newest_first_with_the_entered_result(viewer, monkeypatch):
+    from tiptop import task_result_log
+
+    entries = [dict(task=2, name_ko="후추통", effort_counts=50, close_position_counts=700, close_current_counts=-49,
+                    grasp="성공", executed=True, duration_s=17.0),
+               dict(task=1, name_ko="바가지", duration_s=3.0, status="failed", failed_stage="planning")]
+    monkeypatch.setattr(task_result_log, "read_task_log", lambda path=None, limit=100: entries)
+    task_result_log.TASK_MARKS_PATH.write_text(json.dumps({"1": dict(result="충돌", perception="오인식")}))
+    server = viewer(RunManager(ROOT, build=python_command("pass")))
+    status, data = request(server, "GET", "/api/task-log", token=server.launcher_token)
+    assert status == 200 and json.loads(data)["rows"] == [
+        dict(task=2, line="TASK 2 · 후추통 · effort 50 · 전류 -49 · 위치 700 · 17.0초 · 파지 성공 · 작업 완료",
+             cells=["TASK 2", "후추통", "effort 50", "전류 -49", "위치 700", "17.0초", "파지 성공", "작업 완료", ""],
+             perception="", result=""),
+        dict(task=1, line="TASK 1 · 바가지 · effort - · 전류 - · 위치 - · 3.0초 · 작업 중단(planning)",
+             cells=["TASK 1", "바가지", "effort -", "전류 -", "위치 -", "3.0초", "", "작업 중단(planning)", ""],
+             perception="오인식", result="충돌"),
+    ]
+
+
+def test_what_is_entered_in_the_page_is_saved_and_cleared_with_an_empty_value(viewer, monkeypatch):
+    from tiptop import task_result_log
+
+    monkeypatch.setattr(task_result_log, "read_task_log", lambda path=None, limit=100: [dict(task=5)])
+    server = viewer(RunManager(ROOT, build=python_command("pass")))
+    mark = lambda task, field, value: request(server, "POST", "/api/task-log/mark",
+                                              body=dict(task=task, field=field, value=value), token=server.launcher_token)[0]
+    assert mark(5, "result", "이송 중 놓침") == 200 and mark(5, "perception", "오인식") == 200
+    assert task_result_log.read_task_marks() == {"5": dict(result="이송 중 놓침", perception="오인식")}
+    assert mark(5, "result", "") == 200 and mark(5, "perception", "") == 200 and task_result_log.read_task_marks() == {}
+    # not in the log / not a listed value / not a field
+    assert mark(6, "result", "성공") == 400 and mark(5, "result", "기타") == 400 and mark(5, "name", "성공") == 400
+
+
 def test_demo_objects_are_numbered_from_one_in_the_configured_order(viewer):
     server = viewer(RunManager(ROOT, build=python_command("pass")))
     objects = json.loads(request(server, "GET", "/api/objects", token=server.launcher_token)[1])["objects"]

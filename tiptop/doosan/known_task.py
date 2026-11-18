@@ -77,6 +77,30 @@ def turn_grasps(grasps, angles):
     return grasps @ torch.as_tensor(z_rotations(angles), dtype=grasps.dtype, device=grasps.device)
 
 
+def selected_db_row(db_path, row_indices, candidate_tcp, target_tcp, *, position_tolerance_m=1e-4, axis_tolerance_deg=0.2):
+    """The DB row whose grasp the plan executes, found by TCP position and approach axis.
+
+    The final TCP may be turned about its approach axis by the finger symmetry, so that rotation is reported
+    (`symmetry_turn_deg`) instead of being matched. No row is named when none is within the tolerances.
+    """
+    from tiptop.doosan.grasp_database import database_row_summary
+
+    target = np.asarray(target_tcp, float)
+    candidates = np.asarray(candidate_tcp, float)
+    position_error = np.linalg.norm(candidates[:, :3, 3] - target[:3, 3], axis=1)
+    axis_error = np.degrees(np.arccos(np.clip(candidates[:, :3, 2] @ target[:3, 2], -1, 1)))
+    best = int(np.argmin(position_error + 1e-3 * axis_error))
+    if position_error[best] > position_tolerance_m or axis_error[best] > axis_tolerance_deg:
+        return dict(row_index=None, position_error_m=float(position_error[best]), axis_error_deg=float(axis_error[best]))
+    turn = candidates[best, :3, :3].T @ target[:3, :3]
+    return dict(
+        database_row_summary(db_path, row_indices[best]),
+        position_error_m=float(position_error[best]),
+        axis_error_deg=float(axis_error[best]),
+        symmetry_turn_deg=float(np.degrees(np.arctan2(turn[1, 0], turn[0, 0]))),
+    )
+
+
 def first_successful_solutions(solved):
     """First successful seed's joint solution per goal, as the screened-IK reuse selects it."""
     import torch
@@ -173,6 +197,7 @@ def plan_known_task(
     from tiptop.doosan.model import ASSETS, m1013_uon_curobo_cfg
     from tiptop.doosan.planning import prepare_joint_path
     from tiptop.doosan.tamp import m1013_entrypoint, verify_gateway_contract
+    from tiptop.object_catalog import grasp_effort_counts
     from tiptop.perception.cad_cache import load_cad_mesh
     from tiptop.perception.known_objects import registered_object
     from tiptop.perception.placement import table_support_z
@@ -487,8 +512,11 @@ def plan_known_task(
     serialized = serialize_plan(plan, observation.q_init)
     for step in plan:
         if step.get("label") == "Pick.descend" and "grasp_target_world_from_tcp" in step:
-            serialized["selected_grasp"] = dict(world_from_tcp=step["grasp_target_world_from_tcp"],
-                                                source="completed_motion_plan")
+            serialized["selected_grasp"] = dict(
+                world_from_tcp=step["grasp_target_world_from_tcp"], source="completed_motion_plan",
+                db=selected_db_row(entry["db"], data["candidate_indices"][selected], tcp[selected],
+                                   step["grasp_target_world_from_tcp"]),
+            )
     serialized.update(
         robot="m1013_uon",
         placement_region=region,
@@ -506,6 +534,8 @@ def plan_known_task(
         if step["type"] == "trajectory":
             positions, velocities, _ = prepare_joint_path(step["positions"], step["velocities"], step["dt"])
             step.update(positions=positions, velocities=velocities)
+        elif step["label"] == "Pick.close":
+            step["effort_counts"] = grasp_effort_counts(entry["class_id"])
 
     def tcp_at(q):
         state = kin.get_state(tensor.to_device(np.asarray(q)[None]))

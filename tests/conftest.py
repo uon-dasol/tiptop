@@ -39,3 +39,12 @@ def h5_assets():
     h5_files = sorted(ASSETS_DIR.glob("*.h5"))
     assert len(h5_files) > 0, f"No H5 files found in {ASSETS_DIR} after download"
     return ASSETS_DIR
+
+
+@pytest.fixture(autouse=True)
+def isolated_task_log(tmp_path, monkeypatch):
+    """No test may touch the real task log or the results entered by hand."""
+    from tiptop import task_result_log
+
+    monkeypatch.setattr(task_result_log, "TASK_LOG_PATH", tmp_path / "task-log.jsonl")
+    monkeypatch.setattr(task_result_log, "TASK_MARKS_PATH", tmp_path / "task-marks.json")

@@ -28,7 +28,7 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
 @media(max-width:900px){.launcher{grid-template-columns:1fr}}.launcher .lrow{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.launcher .seg{display:flex;gap:6px}
 .launcher .lfields{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px 14px}.launcher label.field{display:grid;gap:4px;color:var(--muted);font-size:12px}.launcher label.field.wide{grid-column:1/-1}
 .launcher label.field input[type=text],.launcher label.field input[type=number],.launcher label.field select{background:#111718;color:var(--ink);border:1px solid #3c4845;border-radius:6px;padding:6px 8px;width:100%}
-.launcher label.check-field{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px}
+.launcher .check-stack{display:flex;flex-direction:column;justify-content:center;gap:10px}.launcher label.check-field{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px}
 .launcher .mode-options-title{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.launcher .mode-fields{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px}.launcher .mode-fields label.field{min-width:0}@media(max-width:900px){.launcher .mode-fields{grid-template-columns:1fr}}
 .launcher textarea{flex:1;min-width:320px;background:#0c1112;color:var(--cyan);border:1px solid var(--line);border-radius:6px;padding:8px;font:12px ui-monospace,monospace;resize:vertical}
 .launcher pre{margin:0;max-height:240px;overflow:auto;background:#0c1112;border:1px solid var(--line);border-radius:6px;padding:10px;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}
@@ -40,6 +40,7 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
 .views{grid-template-columns:repeat(4,minmax(0,1fr))}.obstacle-controls{display:flex;gap:8px;align-items:center;font-size:11px}.obstacle-controls label{display:flex;gap:3px;align-items:center;white-space:nowrap}.obstacle-controls input{accent-color:var(--accent)}.obstacle-controls button{padding:4px 7px;font-size:11px}
 #obstaclePanel:fullscreen{display:flex;flex-direction:column;background:var(--bg);padding:20px}#obstaclePanel:fullscreen .viewport{flex:1;aspect-ratio:auto;min-height:0}#obstaclePanel:fullscreen .panel-title,#obstaclePanel:fullscreen .footer{flex-shrink:0}
 @media(max-width:1280px){.views{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:900px){.views{grid-template-columns:1fr}}
+.tasklog{width:100%;margin-bottom:10px}.lfields .tasklog{grid-column:1/-1;margin:2px 0 0}.tasklog #taskLogLines{max-height:7.8em;overflow:auto;margin-top:5px;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:#0f1514;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}.tasklog #taskLogLines div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tasklog .taskrow{display:grid;grid-template-columns:6.3em 9.5em 5.8em 5.8em 6.8em 4.6em 5em 16em 1fr 7.5em 10em;gap:0 10px;align-items:center;min-width:max-content}.tasklog select.taskmark{width:100%;font:11px system-ui,sans-serif;background:#111718;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 3px}.tasklog select.taskmark.ok{color:#66db95}.tasklog select.taskmark.fail{color:#ff7676}.tasklog .grasp-ok{color:#66db95}.tasklog .tasktail{display:flex;gap:10px}.tasklog .tasktail span:first-child{min-width:5em}.tasklog .demo-tag{color:#ffbe5c}.tasklog .grasp-fail{color:#ff7676}
 </style>
 </head>
 <body>
@@ -66,6 +67,7 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
   </div>
  </section>
  <section class="panel tools">
+  <div class="tasklog hidden" id="taskLog"><span class="group-title">작업 결과</span><div id="taskLogLines"></div></div>
   <div class="group"><span class="group-title">OVERLAY</span><label class="check"><input type="checkbox" id="maskToggle" checked>마스크</label><label class="check"><input type="checkbox" id="boxToggle" checked>검출 박스</label><label class="check"><input type="checkbox" id="graspToggle" checked><span id="graspLabel">최종 파지</span></label><label class="check"><input type="checkbox" id="graspBoxesToggle" checked>계획 손가락 범위</label></div>
   <div class="group"><select id="graspMode" aria-label="파지 표시 종류"><option value="final">실행 계획의 최종 파지</option><option value="candidates">DB 후보 조회 (보관)</option></select></div>
   <div class="group hidden" id="candidateTools"><label class="range-group">동시 표시 <input type="range" id="count" min="1" max="32" value="1"><span id="countValue">1</span></label><button id="previous" aria-label="이전 파지 후보">←</button><select id="candidate" aria-label="상세 표시할 파지 후보"><option value="">파지 후보 대기</option></select><button id="next" aria-label="다음 파지 후보">→</button><span class="tag" id="candidateIndex">—</span></div>
@@ -81,7 +83,13 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
 </dialog>
 <script>
 let state=null, images={}, signature='', selectedId=null, view=null, viewMode='target', graspMode='final', unit=1;
-let obstacleCamera={mode:'rgb'};
+let obstacleCamera={mode:'rgb'},demoView=false;
+function setDemoView(on){
+ if(on===demoView)return;demoView=on;$('fitTarget').disabled=on;
+ if(!state)return;
+ if(on){viewMode='full';setView(0,0,state.width)}else{viewMode='target';fitTarget()}
+ draw();
+}
 const $=id=>document.getElementById(id);
 const loadImage=url=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=url});
 function pathLine(ctx,from,to,color,width){ctx.beginPath();ctx.moveTo(...from);ctx.lineTo(...to);ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke()}
@@ -314,7 +322,7 @@ async function poll(){
   for(const g of state.grasps){const feasible=state.feasible_ids?.includes(g.id)?' · 충돌/IK 통과':'';select.add(new Option(`DB #${g.id} · score ${g.score.toFixed(3)}${feasible}`,g.id))}
   if(changed||!state.grasps.some(g=>g.id===selectedId))selectedId=state.grasps.find(g=>state.feasible_ids?.includes(g.id))?.id??state.grasps[0]?.id??null;
   select.value=selectedId??'';updateGraspInfo();
-  if(changed){view=null;viewMode='target';obstacleCamera={mode:'rgb'}}if(viewMode==='target')fitTarget();else if(!view)setView(0,0,state.width);
+  if(changed){view=null;viewMode=demoView?'full':'target';obstacleCamera={mode:'rgb'}}if(viewMode==='target')fitTarget();else if(!view)setView(0,0,state.width);
   draw();
  }catch(error){}
  finally{setTimeout(poll,500)}
@@ -329,7 +337,7 @@ document.addEventListener('fullscreenchange',()=>{$('obstacleExpand').textConten
  canvas.addEventListener('pointerdown',event=>{const rgb=obstacleCamera.mode==='rgb',camera=rgb?state?.obstacle_scene?.camera:obstacleCamera.camera;if(!camera)return;drag={x:event.clientX,y:event.clientY,camera,crop:{...(rgb?view:obstacleCamera.crop)},pivot:obstacleOrbitCenter(state?.obstacle_scene)};canvas.setPointerCapture(event.pointerId)});
  canvas.addEventListener('pointermove',event=>{if(!drag||Math.hypot(event.clientX-drag.x,event.clientY-drag.y)<2)return;obstacleCamera={mode:'orbit',camera:orbitObstacleCamera(drag.camera,drag.pivot,event.clientX-drag.x,event.clientY-drag.y),crop:drag.crop};drawObstacles()});
  for(const event of ['pointerup','pointercancel'])canvas.addEventListener(event,()=>{drag=null});
- canvas.addEventListener('wheel',event=>{event.preventDefault();if(obstacleCamera.mode==='rgb'&&state?.obstacle_scene?.camera&&view){const w=Math.max(state.width/8,Math.min(state.width,view.w*Math.exp(event.deltaY*.0015))),h=w*state.height/state.width;viewMode='manual';setView(view.x+(view.w-w)/2,view.y+(view.h-h)/2,w);draw();return}if(obstacleCamera.camera){const crop=obstacleCamera.crop,w=Math.max(state.width/8,Math.min(state.width,crop.w*Math.exp(event.deltaY*.0015))),h=w*state.height/state.width;obstacleCamera.crop={x:crop.x+(crop.w-w)/2,y:crop.y+(crop.h-h)/2,w,h};drawObstacles()}},{passive:false});
+ canvas.addEventListener('wheel',event=>{event.preventDefault();if(demoView)return;if(obstacleCamera.mode==='rgb'&&state?.obstacle_scene?.camera&&view){const w=Math.max(state.width/8,Math.min(state.width,view.w*Math.exp(event.deltaY*.0015))),h=w*state.height/state.width;viewMode='manual';setView(view.x+(view.w-w)/2,view.y+(view.h-h)/2,w);draw();return}if(obstacleCamera.camera){const crop=obstacleCamera.crop,w=Math.max(state.width/8,Math.min(state.width,crop.w*Math.exp(event.deltaY*.0015))),h=w*state.height/state.width;obstacleCamera.crop={x:crop.x+(crop.w-w)/2,y:crop.y+(crop.h-h)/2,w,h};drawObstacles()}},{passive:false});
 }
 for(const id of ['maskToggle','boxToggle','graspToggle','graspBoxesToggle'])$(id).addEventListener('change',()=>{if(id==='graspBoxesToggle'&&viewMode==='target')fitTarget();draw()});
 $('count').addEventListener('input',()=>{$('countValue').textContent=$('count').value;draw()});
@@ -342,8 +350,8 @@ $('closeFingerDetail').addEventListener('click',()=>$('fingerDialog').close());
 $('fitTarget').addEventListener('click',()=>{viewMode='target';fitTarget();draw()});$('fitAll').addEventListener('click',()=>{if(!state)return;viewMode='full';setView(0,0,state.width);draw()});
 for(const id of ['rgb','depth']){
  const canvas=$(id);let drag=null;
- canvas.addEventListener('wheel',event=>{if(!view||!state)return;event.preventDefault();const rect=canvas.getBoundingClientRect(),u=(event.clientX-rect.left)/rect.width,v=(event.clientY-rect.top)/rect.height;const w=Math.max(state.width/8,Math.min(state.width,view.w*Math.exp(event.deltaY*.0015))),h=w*state.height/state.width;viewMode='manual';setView(view.x+u*(view.w-w),view.y+v*(view.h-h),w);draw()},{passive:false});
- canvas.addEventListener('pointerdown',event=>{if(!view)return;drag={x:event.clientX,y:event.clientY,view:{...view}};canvas.setPointerCapture(event.pointerId)});
+ canvas.addEventListener('wheel',event=>{if(!view||!state||demoView)return;event.preventDefault();const rect=canvas.getBoundingClientRect(),u=(event.clientX-rect.left)/rect.width,v=(event.clientY-rect.top)/rect.height;const w=Math.max(state.width/8,Math.min(state.width,view.w*Math.exp(event.deltaY*.0015))),h=w*state.height/state.width;viewMode='manual';setView(view.x+u*(view.w-w),view.y+v*(view.h-h),w);draw()},{passive:false});
+ canvas.addEventListener('pointerdown',event=>{if(!view||demoView)return;drag={x:event.clientX,y:event.clientY,view:{...view}};canvas.setPointerCapture(event.pointerId)});
  canvas.addEventListener('pointermove',event=>{if(!drag)return;const rect=canvas.getBoundingClientRect();viewMode='manual';setView(drag.view.x-(event.clientX-drag.x)*drag.view.w/rect.width,drag.view.y-(event.clientY-drag.y)*drag.view.h/rect.height,drag.view.w);draw()});
  for(const name of ['pointerup','pointercancel'])canvas.addEventListener(name,()=>{drag=null});
 }
@@ -361,14 +369,14 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
   const data=await response.json();if(!response.ok)throw Error(data.error||String(response.status));return data;
  }
  function render(){
-  const box=$('lfields');box.replaceChildren();let modeFields=null,modeTitle=null;
+  const box=$('lfields'),taskLogBox=$('taskLog');box.replaceChildren();let stack=null,modeFields=null,modeTitle=null;
   for(const field of [...cfg.fields].sort((a,b)=>!!a.modes-!!b.modes)){
    if(field.hidden||field.show_modes&&!field.show_modes.includes(mode)||field.modes&&!field.modes.includes(mode)||field.tasks&&!field.tasks.includes(values[mode].task_preset)&&!(field.key.startsWith('box_')&&values[mode].fixed_box_present))continue;
    if(field.modes&&!modeFields){modeTitle=document.createElement('div');modeTitle.className='lsep mode-options-title';modeTitle.textContent=(mode==='sam3_reference'?'SAM3':'Gemini')+' 전용 설정';modeFields=document.createElement('div');modeFields.className='mode-fields';box.append(modeTitle,modeFields)}
    const label=document.createElement('label');let input;
    if(field.type==='checkbox'){
     label.className='check-field';input=document.createElement('input');input.type='checkbox';input.checked=!!values[mode][field.key];
-    input.addEventListener('change',()=>{values[mode][field.key]=input.checked;if(field.key==='minimal_records')buildObjects();schedulePreview()});label.append(input,field.label);
+    input.addEventListener('change',()=>{values[mode][field.key]=input.checked;if(field.key==='minimal_records'){setDemoView(input.checked);buildObjects()}schedulePreview()});label.append(input,field.label);
    }else{
     label.className='field'+(field.key==='task'?' wide':'');
     if(field.type==='select'){input=document.createElement('select');for(const option of field.options){const entry=new Option(field.option_labels?.[option]??option,option);if(field.key==='task_preset'){const modes=cfg.task_presets[option].perception_modes;entry.disabled=!!modes&&!modes.includes(mode)}input.add(entry)}}
@@ -376,8 +384,12 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
     input.value=values[mode][field.key]??'';if(field.key==='task'){input.id='taskInput';$('rgbTask').value=input.value}
     input.addEventListener('input',()=>{values[mode][field.key]=input.value;if(field.key==='task'){$('rgbTask').value=input.value;markObject()}if(field.key==='task_preset'){const [id]=splitTask(values[mode].task||''),object=objects.find(o=>o.class_id===id),preset=cfg.task_presets[input.value];if(object)values[mode].task=object.name_ko+' '+preset.action;values[mode].release_height_m=preset.release_height_m;render();markObject()}schedulePreview()});label.append(field.label,input);
    }
-   if(field.key==='appearance_ranking')modeTitle.append(label);else (field.modes?modeFields:box).append(label);
+   if(field.key==='appearance_ranking')modeTitle.append(label);
+   else if(field.key==='surrounding_obstacles'||field.key==='minimal_records'){if(!stack){stack=document.createElement('div');stack.className='check-stack';box.append(stack)}stack.append(label)}
+   else (field.modes?modeFields:box).append(label);
+   if(field.key==='minimal_records')box.append(taskLogBox);
   }
+  setDemoView(!!values[mode].minimal_records);
   if(objects.length&&shownDemo!==!!values[mode].minimal_records)buildObjects();
  }
  function mark(){
@@ -436,6 +448,39 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
   catch(error){$('runMsg').textContent=error.message}
  }
  function setRunning(value){running=value;$('runBtn').disabled=value;$('stopBtn').disabled=!value}
+ let taskLogText='';
+ const markChoices={
+  perception:['인식 선택',[['정상 인식','정상 인식'],['오인식','오인식']]],
+  result:['결과 선택',[['성공','성공'],['파지 실패','실패 · 파지 실패'],['이송 중 놓침','실패 · 이송 중 놓침'],['충돌','실패 · 충돌']]]};
+ const markClass={'성공':' ok','정상 인식':' ok','오인식':' fail'};
+ async function refreshTaskLog(){
+  try{
+   const rows=(await api('/api/task-log')).rows,text=JSON.stringify(rows),box=$('taskLogLines');
+   $('taskLog').classList.toggle('hidden',!rows.length);
+   if(text===taskLogText||box.contains(document.activeElement))return;taskLogText=text;
+   box.replaceChildren();
+   for(const row of rows){
+    const item=document.createElement('div');item.className='taskrow';item.title=row.line;
+    const tail=document.createElement('span');tail.className='tasktail';
+    row.cells.forEach((cell,index)=>{
+     const column=document.createElement('span');column.textContent=cell;
+     if(cell==='파지 성공'||cell==='작업 완료')column.className='grasp-ok';
+     else if(cell==='파지 실패'||cell.startsWith('작업 중단('))column.className='grasp-fail';
+     else if(cell==='데모 모드')column.className='demo-tag';
+     (index<7?item:tail).append(column)});
+    item.append(tail,document.createElement('span'));
+    for(const field of ['perception','result']){
+     const [placeholder,options]=markChoices[field],current=row[field],select=document.createElement('select');
+     select.className='taskmark'+(markClass[current]??(current?' fail':''));select.title=field==='perception'?'물체를 제대로 알아봤는가':'이 작업의 실제 결과';
+     select.add(new Option(placeholder,''));for(const [value,name] of options)select.add(new Option(name,value));
+     select.value=current;
+     select.addEventListener('change',async()=>{
+      try{await api('/api/task-log/mark',{task:row.task,field,value:select.value});taskLogText='';select.blur();refreshTaskLog()}
+      catch(error){select.value=current}});
+     item.append(select)}
+    box.append(item)}
+  }catch(error){}
+ }
  async function refreshStatus(){
   try{
    const data=await api('/api/status');
@@ -466,7 +511,7 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
   try{objects=(await api('/api/objects')).objects}catch(error){objects=[]}
   window.objectNames=Object.fromEntries(objects.map(o=>[o.class_id,o.name_ko]));draw();
   buildObjects();
-  $('launcher').classList.remove('hidden');mark();render();preview();refreshStatus();setInterval(refreshStatus,3000);
+  $('launcher').classList.remove('hidden');mark();render();preview();refreshStatus();setInterval(refreshStatus,3000);refreshTaskLog();setInterval(refreshTaskLog,3000);
  })().catch(error=>{$('launcher').classList.remove('hidden');$('runMsg').textContent=error.message});
 })();
 </script>

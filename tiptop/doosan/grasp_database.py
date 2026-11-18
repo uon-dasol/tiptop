@@ -72,6 +72,19 @@ def _ranked_candidates(path, mtime_ns, size):
     )
 
 
+def database_row_summary(path, row_index):
+    """Fields of one DB row worth keeping beside a plan; the DB file itself is only read."""
+    row = _document(*_file_key(path))["data"][int(row_index)]
+    joints = row.get("target_joint_pos") or {}
+    return dict(
+        row_index=int(row_index),
+        target_width_m=float(row["target_width"]),
+        spinner_start_rad=joints.get("start", {}).get("spinner_joint"),
+        spinner_end_rad=joints.get("end", {}).get("spinner_joint"),
+        score=float(row["score"]),
+    )
+
+
 def ensure_database_cache_capacity(objects):
     """Grow both caches before warming a sequence; do not resize during planning."""
     global _document, _ranked_candidates

@@ -44,7 +44,9 @@ def execute_cutamp_plan(cutamp_plan: list[dict], client: "RobotClient | None" = 
             if action == "open":
                 result = client.open_gripper(speed=1.0)
             elif action == "close":
-                result = client.close_gripper(speed=1.0)
+                # Only plans that name a closing current add the argument; other robots' clients never see it.
+                extra = {} if "effort_counts" not in action_dict else {"effort_counts": action_dict["effort_counts"]}
+                result = client.close_gripper(speed=1.0, **extra)
             else:
                 raise ValueError(f"Unknown gripper action: {action}")
 

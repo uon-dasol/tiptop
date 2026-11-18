@@ -115,8 +115,11 @@ class DoosanUONClient:
     def open_gripper(self, speed=1.0, force=0.1):
         return self._request("/gripper", {"action": "open", "speed": speed, "force": force}, timeout=180.0)
 
-    def close_gripper(self, speed=1.0, force=0.1):
-        return self._request("/gripper", {"action": "close", "speed": speed, "force": force}, timeout=180.0)
+    def close_gripper(self, speed=1.0, force=0.1, effort_counts=None):
+        payload = {"action": "close", "speed": speed, "force": force}
+        if effort_counts is not None:
+            payload["effort_counts"] = effort_counts
+        return self._request("/gripper", payload, timeout=180.0)
 
     def stop(self):
         return self._request("/stop", {})

@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from tiptop.launcher import FIELDS, KINDS, MODES, PRESETS_PATH, load_presets, save_preset
 from tiptop.object_catalog import demo_order, load_catalog
+from tiptop.task_result_log import set_task_mark, task_log_rows
 from tiptop.run_manager import RunManager
 
 
@@ -80,6 +81,11 @@ def make_server(root, *, port=8091, task_output=None, launcher=None, presets_pat
     def handle_api(method, path, query, body):
         if method == "GET" and path == "/api/presets":
             return 200, dict(fields=FIELDS, modes=list(MODES), kinds=list(KINDS), **load_presets(presets_path))
+        if method == "GET" and path == "/api/task-log":
+            return 200, dict(rows=task_log_rows())
+        if method == "POST" and path == "/api/task-log/mark":
+            set_task_mark(int(body["task"]), body["field"], body["value"])
+            return 200, dict(saved=True)
         if method == "GET" and path == "/api/objects":
             demo = demo_order()
             return 200, dict(objects=[dict(class_id=item["class_id"], name_ko=item["name_ko"],

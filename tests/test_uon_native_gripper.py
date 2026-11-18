@@ -165,3 +165,58 @@ def test_operator_profile_opens_at_3400_and_readiness_uses_the_same_target():
     state["gripper"]["position_counts"] = 1800
     with pytest.raises(ValueError, match="did not reach its open position"):
         check_gateway_state(state, execute=True, require_open=True)
+
+
+def test_result_keeps_a_short_position_current_trace_for_later_analysis():
+    device = Device("contact")
+    result = device.controller().run("close")
+    trace = result["trace"]
+    assert 2 <= len(trace) <= native.TRACE_POINTS
+    assert [row[0] for row in trace] == sorted(row[0] for row in trace)
+    assert trace[-1][1] == result["position_counts"] and trace[-1][2] == result["current_counts"]
+
+
+def test_trace_is_thinned_to_evenly_spaced_points_with_both_ends():
+    points = list(range(1000))
+    short = native.thinned(points, 5)
+    assert short == [0, 250, 499, 749, 999] or (short[0] == 0 and short[-1] == 999 and len(short) == 5)
+    assert native.thinned([1, 2], 5) == [1, 2]
+
+
+def test_a_requested_closing_current_is_published_and_the_contact_threshold_keeps_its_ratio():
+    device = Device("contact")  # profile: close limit 100, contact threshold 60, blocked reading is -80
+    result = device.controller().run("close", current_limit_counts=70)
+    assert device.commands == [(0, 70)] and result["current_limit_counts"] == 70
+    # 70 * 60 / 100 = 42, so the blocked reading of 80 is still contact.
+    assert result["motor_contact_inferred"]
+
+
+@pytest.mark.parametrize("requested", [0, -5, 501, 1.5, float("nan")])
+def test_a_requested_closing_current_must_be_a_whole_number_within_the_motor_limit(requested):
+    device = Device("contact")
+    with pytest.raises(ValueError, match="whole number"):
+        device.controller().run("close", current_limit_counts=requested)
+    assert not device.commands
+
+
+def test_opening_takes_no_current_request_and_a_stop_holds_with_the_last_closing_current():
+    device = Device("contact")
+    controller = device.controller()
+    with pytest.raises(ValueError, match="only be requested for close"):
+        controller.run("open", current_limit_counts=50)
+    controller.run("close", current_limit_counts=70)
+    controller.hold()
+    assert device.commands[-1][1] == 70
+    controller.run("open")
+    controller.hold()
+    assert device.commands[-1][1] == 100  # back to the profile's closing current
+
+
+def test_operator_profile_closes_toward_zero_and_ends_on_contact_when_the_fingers_stop_early():
+    import json
+
+    settings = json.loads((path.parent.parent / "config/uon_native.measured.json").read_text())
+    assert settings["closed_position_counts"] == 0
+    device = Device("contact")
+    result = device.controller(settings).run("close", current_limit_counts=100)
+    assert device.commands == [(0, 100)] and result["motor_contact_inferred"] and not result["endpoint_reached"]

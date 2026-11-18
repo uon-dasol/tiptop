@@ -52,6 +52,7 @@ from tiptop.task_logging import LOG_OWNER_ENV, capture_terminal_log
 from tiptop.task_timing import TaskTimings
 from tiptop.console import timing_line
 from tiptop.serialization import savez_fast
+from tiptop.task_result_log import append_task_log
 from tiptop.task_presets import TASK_PRESETS, TaskSettings, prepare_task_environment
 from tiptop.utils import NumpyEncoder
 
@@ -687,6 +688,7 @@ async def _run_task(args):
         (args.output / "timings.json").write_text(json.dumps(timings, indent=2) + "\n")
     except OSError as error:
         logging.getLogger(__name__).warning("Could not save timings.json: %s", error)
+    append_task_log(args.output, result, timings["task_wall_seconds"], demo=getattr(args, "minimal_records", False))
     if all(key in args._timings for key in ("perception", "planning", "execution")):
         perception, planning, execution = (
             round(args._timings[key], 2) for key in ("perception", "planning", "execution")
