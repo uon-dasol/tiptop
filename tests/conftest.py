@@ -48,3 +48,9 @@ def isolated_task_log(tmp_path, monkeypatch):
 
     monkeypatch.setattr(task_result_log, "TASK_LOG_PATH", tmp_path / "task-log.jsonl")
     monkeypatch.setattr(task_result_log, "TASK_MARKS_PATH", tmp_path / "task-marks.json")
+
+
+@pytest.fixture(autouse=True)
+def default_robot_limits(tmp_path, monkeypatch):
+    """Never read or write the user's saved robot limits during tests."""
+    monkeypatch.setattr("tiptop.robot_limits.PATH", tmp_path / "robot_limits.json")

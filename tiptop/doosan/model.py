@@ -4,6 +4,7 @@ The arm has six planning joints; spinner and mimicked fingers are locked at the 
 Dataset grasp -> model TCP calibration is still required before object tasks.
 """
 
+import copy
 from functools import lru_cache
 from pathlib import Path
 
@@ -20,6 +21,8 @@ from yourdfpy import URDF
 from cutamp.robots import RobotContainer
 from cutamp.robots.utils import RerunRobot
 
+from tiptop.robot_limits import load_robot_limits
+
 ASSETS = Path(__file__).parent / 'assets/m1013_uon'
 m1013_uon_home = (0.0,) * 6  # Model reference pose, not a calibrated physical home.
 OPEN_POSITION = 0.0
@@ -27,7 +30,7 @@ CLOSED_POSITION = 1.5009832  # Same model endpoint as the ROS2 gateway.
 
 
 @lru_cache(maxsize=2)
-def m1013_uon_curobo_cfg(gripper_position=OPEN_POSITION):
+def _m1013_uon_base_cfg(gripper_position):
     if not OPEN_POSITION <= gripper_position <= CLOSED_POSITION:
         raise ValueError('Gripper angle is outside the model limits')
     cfg = load_yaml(str(ASSETS / 'm1013_uon.yml'))
@@ -35,6 +38,20 @@ def m1013_uon_curobo_cfg(gripper_position=OPEN_POSITION):
     cfg['robot_cfg']['kinematics']['external_asset_path'] = str(ASSETS)
     cfg['robot_cfg']['kinematics']['external_robot_configs_path'] = str(ASSETS)
     return cfg
+
+
+def apply_robot_limits(cfg):
+    """Set the six arm joints' acceleration and jerk in `cfg` to the limits currently saved for the planner."""
+    cspace = cfg['robot_cfg']['kinematics']['cspace']
+    limits = load_robot_limits()
+    for key in ('max_acceleration', 'max_jerk'):
+        gripper = cspace[key][-1] if isinstance(cspace[key], list) else cspace[key]  # the locked gripper joint
+        cspace[key] = [*limits[key], gripper]
+    return cfg
+
+
+def m1013_uon_curobo_cfg(gripper_position=OPEN_POSITION):
+    return apply_robot_limits(copy.deepcopy(_m1013_uon_base_cfg(gripper_position)))
 
 
 def get_m1013_uon_kinematics_model(tensor_args=TensorDeviceType()):

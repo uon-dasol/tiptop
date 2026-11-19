@@ -1,9 +1,14 @@
 {
   "home_drop": {
-    "label": "박스에 놓기",
+    "label": "초기 위치에서 박스에 놓기",
     "action": "집고 박스에 놓아",
     "release_height_m": 0.0,
     "box_wall_thickness_m": 0.005
+  },
+  "fixed_box": {
+    "label": "박스에 놓기",
+    "action": "집고 박스에 놓아",
+    "release_height_m": 0.0
   },
   "perceived_surface": {
     "label": "인식한 목적지에 놓기",

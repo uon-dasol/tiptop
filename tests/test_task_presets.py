@@ -15,7 +15,9 @@ from cutamp.envs import TAMPEnvironment
 from cutamp.tamp_domain import HandEmpty, Holding, On
 
 from tiptop.doosan.known_task import KnownTaskPlanningSettings
-from tiptop.doosan.place_task import cad_bottom_correction, placement_height_context, run_standard_place, validate_place_plan
+from tiptop.doosan.place_task import (cad_bottom_correction, choose_release_turn, footprint_overhang_m,
+                                      placement_height_context, release_j6_turn, release_turn_candidates,
+                                      run_standard_place, turn_about_approach, validate_place_plan)
 from tiptop.launcher import build_command, load_presets
 from tiptop.task_presets import FIXED_BOX_NAME, TaskSettings, prepare_task_environment
 
@@ -48,6 +50,40 @@ def upstream():
     return SimpleNamespace(solver=solver, costs=costs, initialization=initialization)
 
 
+def test_fixed_box_is_a_solid_place_destination_and_the_box_stays_at_15_cm(scene):
+    original, observed, full = scene
+    settings = TaskSettings(preset="fixed_box")
+    env, region = prepare_task_environment(original, observed, settings, fixed_obstacles=[full])
+    box = next(item for item in env.statics if item.name == FIXED_BOX_NAME)
+    assert box.dims == [.35, .20, .15]
+    assert box.pose[:3] == [0, .35, .075]
+    assert region["support_z_m"] == .15 and region["release_bottom_z_m"] == .15
+    assert env.goal_state == frozenset({On.ground("object", FIXED_BOX_NAME), HandEmpty.ground()})
+    assert original.goal_state == frozenset({Holding.ground("object")})
+    assert len(original.statics) == 1
+    assert box.pose[1] + box.dims[1]/2 == pytest.approx(.45)  # Stops before the red tape strip (Y=0.452).
+    again, _ = prepare_task_environment(env, observed, settings, fixed_obstacles=[full])
+    assert sum(item.name == FIXED_BOX_NAME for item in again.statics) == 1
+
+
+def test_switching_between_the_fixed_box_and_the_walled_box_replaces_the_registered_geometry(scene):
+    original, observed, full = scene
+    solid, _ = prepare_task_environment(original, observed, TaskSettings(preset="fixed_box"), fixed_obstacles=[full])
+    walled, _ = prepare_task_environment(solid, observed, TaskSettings(preset="home_drop"), fixed_obstacles=[full])
+    assert all(item.name != FIXED_BOX_NAME for item in walled.statics)
+    assert sum(item.name.startswith(FIXED_BOX_NAME) for item in walled.statics) == 4
+    back, _ = prepare_task_environment(walled, observed, TaskSettings(preset="fixed_box"), fixed_obstacles=[full])
+    assert sum(item.name == FIXED_BOX_NAME for item in back.statics) == 1
+    assert sum(item.name.startswith(FIXED_BOX_NAME) for item in back.statics) == 1
+
+
+def test_fixed_box_only_asks_perception_for_the_object():
+    settings = TaskSettings(preset="fixed_box")
+    assert settings.perception_instruction("ice_pack 집고 박스에 놓아") == "ice_pack 집어"
+    with pytest.raises(ValueError, match="박스에 놓기"):
+        settings.perception_instruction("ice_pack")
+
+
 def test_home_drop_holds_the_object_and_models_the_box_as_four_5_mm_walls(scene):
     original, observed, full = scene
     settings = TaskSettings(preset="home_drop")
@@ -77,7 +113,7 @@ def test_home_drop_only_asks_perception_for_the_object():
         settings.perception_instruction("ice_pack")
 
 
-@pytest.mark.parametrize("preset", ["home_drop", "perceived_surface"])
+@pytest.mark.parametrize("preset", ["home_drop", "fixed_box", "perceived_surface"])
 def test_installed_workspace_box_cannot_be_disabled_by_a_stale_task_payload(preset):
     assert TaskSettings(preset=preset, fixed_box_present=False).fixed_box_present
 
@@ -180,13 +216,73 @@ def test_release_height_offsets_sampling_and_support_cost_and_restores_both(upst
     assert float(cost.item()) == pytest.approx(.05, abs=1e-7)
 
 
+def test_release_turn_brings_j6_between_grasp_and_home_through_the_shorter_way():
+    import math
+    deg = math.radians
+    assert release_j6_turn(deg(130), deg(140), deg(97)) == pytest.approx(0)
+    assert release_j6_turn(deg(199), deg(142), deg(97)) == pytest.approx(deg(-57))
+    assert release_j6_turn(deg(60), deg(142), deg(97)) == pytest.approx(deg(37))
+    # -76 deg is the same pose as 284: up to the home value (+173) is shorter than down to the grasp value (-182)
+    assert release_j6_turn(deg(-76), deg(102), deg(97)) == pytest.approx(deg(173))
+    assert release_j6_turn(deg(250), deg(142), deg(97)) == pytest.approx(deg(-108))
+
+
+def test_footprint_may_reach_past_the_destination_by_the_given_tolerance_but_not_further():
+    initial, vertices, region = placement_inputs()
+    plan = completed_plan()
+    # The 4 cm wide CAD centred 11.3 cm from the box centre reaches 13 mm past the 12 cm half width.
+    for index, column in ((4, -1), (6, 0)):
+        plan["steps"][index]["positions"][column, 0] = .113
+    check = validate_place_plan(plan, tcp_at, initial, vertices, region, overhang_tolerance_mm=25)
+    assert check["footprint_overhang_m"] == pytest.approx(.013) and not check["full_cad_inside_destination"]
+    with pytest.raises(ValueError, match=r"overhang 13 mm, allowed 10 mm"):
+        validate_place_plan(plan, tcp_at, initial, vertices, region, overhang_tolerance_mm=10)
+    with pytest.raises(ValueError, match="footprint"):
+        validate_place_plan(plan, tcp_at, initial, vertices, region)  # no tolerance: any overhang is rejected
+
+
+def test_release_turn_candidates_are_ordered_nearest_end_other_end_then_no_turn():
+    import math
+    deg = math.radians
+    assert release_turn_candidates(deg(199), deg(142), deg(97)) == pytest.approx([deg(-57), deg(-102), 0])
+    assert release_turn_candidates(deg(130), deg(140), deg(97)) == pytest.approx([0, deg(10), deg(-33)])
+    assert release_turn_candidates(deg(60), deg(97), deg(97)) == pytest.approx([deg(37), 0])  # both ends coincide
+
+
+def test_footprint_overhang_is_negative_inside_and_positive_outside_the_destination_top():
+    region = dict(center_xy_m=[0, .35], size_xy_m=[.35, .20])
+    inside = np.array([[-.1, .3, 0], [.1, .4, .1]])
+    assert footprint_overhang_m(inside, region) == pytest.approx(-.05)   # 5 cm to spare in y
+    outside = np.array([[-.1, .3, 0], [.2, .4, .1]])
+    assert footprint_overhang_m(outside, region) == pytest.approx(.025)  # 2.5 cm past the +x edge
+
+
+def test_release_turn_choice_takes_the_first_fitting_candidate_else_the_one_closest_to_fitting():
+    overhangs = {-1.0: .003, 0.5: -.02, 0.0: -.05}
+    assert choose_release_turn([-1.0, 0.5, 0.0], overhangs.get, .01) == 0.5   # first with 1 cm to spare
+    assert choose_release_turn([-1.0, 0.5, 0.0], overhangs.get, .03) == 0.0   # none has 3 cm: least overhang
+    assert choose_release_turn([-1.0], overhangs.get, .01) == -1.0
+
+
+def test_turning_about_the_approach_axis_keeps_the_position_and_the_axis():
+    import math
+    from curobo.types.math import Pose
+
+    matrix = torch.eye(4)
+    matrix[:3, :3] = torch.tensor([[1., 0, 0], [0, -1, 0], [0, 0, -1]])  # approach axis pointing down
+    matrix[:3, 3] = torch.tensor([.1, .2, .3])
+    turned = turn_about_approach(Pose.from_matrix(matrix), math.pi / 2).get_matrix()[0]
+    assert torch.allclose(turned[:3, 3], matrix[:3, 3]) and torch.allclose(turned[:3, 2], matrix[:3, 2])
+    assert torch.allclose(turned[:3, 0], matrix[:3, :3] @ torch.tensor([0., 1., 0.]), atol=1e-6)
+
+
 def completed_plan():
     q = np.zeros(6)
     steps = []
     for label, xyz in [("Pick.approach", [0,.6,.2]), ("Pick.descend", [0,.6,.04]),
                        ("Pick.close", None), ("Place.lift", [0,.6,.09]),
-                       ("Place.transport", [0,.31,.25]), ("Place.descend", [0,.31,.20]),
-                       ("Place.open", None), ("Place.retract", [0,.31,.25]), ("Home", [0,0,0])]:
+                       ("Place.transport", [0,.31,.22]),
+                       ("Place.open", None), ("Home", [0,0,0])]:
         if xyz is None:
             steps.append(dict(type="gripper", label=label, action=label.split(".")[1]))
         else:
@@ -214,19 +310,32 @@ def placement_inputs():
 
 def test_full_cad_not_tcp_defines_the_release_height_and_footprint():
     initial, vertices, region = placement_inputs()
-    check = validate_place_plan(completed_plan(), tcp_at, initial, vertices, region, position_tolerance_m=.01)
-    assert check["release_cad_bottom_z_m"] == pytest.approx(.16)
-    assert check["release_height_m"] == pytest.approx(.05)
+    check = validate_place_plan(completed_plan(), tcp_at, initial, vertices, region)
+    assert check["release_cad_bottom_z_m"] == pytest.approx(.18)  # 2 cm above the requested .16: the carry ends there
+    assert check["release_height_m"] == pytest.approx(.07)
     bad = completed_plan()
-    bad["steps"][5]["positions"][-1, 0] = .15
-    bad["steps"][7]["positions"][0, 0] = .15
+    bad["steps"][4]["positions"][-1, 0] = .15
+    bad["steps"][6]["positions"][0, 0] = .15
     with pytest.raises(ValueError, match="footprint"):
-        validate_place_plan(bad, tcp_at, initial, vertices, region, position_tolerance_m=.01)
+        validate_place_plan(bad, tcp_at, initial, vertices, region)
     bad = completed_plan()
-    bad["steps"][5]["positions"][-1, 2] += .04
-    bad["steps"][7]["positions"][0, 2] += .04
-    with pytest.raises(ValueError, match="bottom"):
-        validate_place_plan(bad, tcp_at, initial, vertices, region, position_tolerance_m=.01)
+    bad["steps"][4]["positions"][-1, 2] -= .04
+    bad["steps"][6]["positions"][0, 2] -= .04
+    with pytest.raises(ValueError, match="below requested"):
+        validate_place_plan(bad, tcp_at, initial, vertices, region)
+    for drop, ok in [(.014, True), (.016, False)]:  # up to 1.5 cm lower than the release point
+        lower = completed_plan()
+        lower["steps"][4]["positions"][-1, 2] -= drop
+        lower["steps"][6]["positions"][0, 2] -= drop
+        if ok:
+            validate_place_plan(lower, tcp_at, initial, vertices, region)
+        else:
+            with pytest.raises(ValueError, match="below requested"):
+                validate_place_plan(lower, tcp_at, initial, vertices, region)
+    high = completed_plan()  # releasing higher than requested is fine
+    high["steps"][4]["positions"][-1, 2] += .04
+    high["steps"][6]["positions"][0, 2] += .04
+    assert validate_place_plan(high, tcp_at, initial, vertices, region)["release_height_m"] > .07
 
 
 def test_partial_top_observation_does_not_change_the_requested_full_cad_release_height():
@@ -246,8 +355,9 @@ def test_partial_top_observation_does_not_change_the_requested_full_cad_release_
     assert object_z - .02 == pytest.approx(target)
 
 
-@pytest.mark.parametrize("failure", [None, "attached_collision", "oversize", "planned_speed_boundary"])
-def test_existing_solver_generates_pick_attached_transport_release_and_home(upstream, failure):
+@pytest.mark.parametrize("failure", [None, "attached_collision", "oversize", "planned_speed_boundary", "joined_pick",
+                                     "joined_carry", "joined_all", "turned_release", "turn_blocked", "oversize_turned"])
+def test_existing_solver_generates_pick_attached_transport_release_and_home(upstream, failure, monkeypatch):
     """Real cuTAMP solve_curobo, fake in-memory MotionGen: no GPU planning or network."""
     tensor = TensorDeviceType(device="cpu")
     calls, attachments, sphere_states = [], [], []
@@ -260,7 +370,7 @@ def test_existing_solver_generates_pick_attached_transport_release_and_home(upst
         q = q if q.ndim == 2 else q[None]
         matrices = torch.diag(torch.tensor([1., -1., -1., 1.])).repeat(len(q), 1, 1)
         matrices[:, :3, 3] = q[:, :3]
-        return SimpleNamespace(ee_pose=SimpleNamespace(get_matrix=lambda: matrices))
+        return SimpleNamespace(ee_pose=SimpleNamespace(get_matrix=lambda: matrices, position=matrices[:, :3, 3]))
 
     class Motion:
         attached = False
@@ -299,7 +409,7 @@ def test_existing_solver_generates_pick_attached_transport_release_and_home(upst
     noop = lambda *args, **kwargs: None
     obstacle = SimpleNamespace(get_bounding_spheres=noop)
     mg = Motion()
-    mg.kinematics = SimpleNamespace(kinematics_config=SimpleNamespace(
+    mg.kinematics = SimpleNamespace(get_state=fk, kinematics_config=SimpleNamespace(
         get_link_spheres=lambda name: torch.ones(2, 4),
         detach_object=lambda name: setattr(mg, "spheres_attached", False),
         attach_object=lambda **kwargs: setattr(mg, "spheres_attached", True)))
@@ -319,8 +429,30 @@ def test_existing_solver_generates_pick_attached_transport_release_and_home(upst
     timer = SimpleNamespace(time=lambda *a, **k: nullcontext(), get_summary=lambda *a: {})
     settings = KnownTaskPlanningSettings()
     particle = dict(q0=torch.tensor([0.,.9,.6,0,0,0]), g=grasp, p=torch.tensor([0.,.31,.16,0.]))
-    if failure == "oversize":
+    if failure in ("oversize", "oversize_turned"):
         vertices[:, 0] *= 10
+    turns = []
+    if failure in ("turned_release", "turn_blocked", "oversize_turned"):
+        # cuTAMP's release joints have J6 at 1 rad while the grasp and home values are both 0: turn it back by 1 rad.
+        # A long object turned that way hangs over the 15 cm side of the box top, so it is released unturned.
+        particle["q2"] = torch.tensor([0., .31, .22, 0, 0, 1.0])
+        if failure == "turn_blocked":
+            vertices[:, 0] *= 4
+        original_turn = turn_about_approach
+        monkeypatch.setattr("tiptop.doosan.place_task.turn_about_approach",
+                            lambda goal, angle: (turns.append(angle), original_turn(goal, angle))[1])
+    joins = dict(joined_pick={0}, joined_carry={1}, joined_all={0, 1}).get(failure, set())
+    if joins:
+        attempts = []
+
+        def join(motion_gen, first, second):
+            attempts.append(None)
+            if len(attempts) - 1 not in joins:
+                return None
+            a, b = first.get_interpolated_plan(), second.get_interpolated_plan()
+            return JointState(position=torch.cat([a.position, b.position[1:]]),
+                              velocity=torch.zeros(len(a.position) + len(b.position) - 1, 6), tensor_args=tensor)
+        monkeypatch.setattr("tiptop.doosan.place_task.joined_path", join)
 
     def run():
         return run_standard_place(upstream.solver.solve_curobo, settings, region, original, vertices,
@@ -329,25 +461,43 @@ def test_existing_solver_generates_pick_attached_transport_release_and_home(upst
                                                   robot="m1013_uon", grasp_dof=6),
                                   timer, visualizer, obj_to_initial_pose={"object": initial}, motion_gen=mg)
 
-    if failure == "oversize":
-        with pytest.raises(upstream.solver.MotionPlanningError, match="footprint"):
+    if failure in ("oversize", "oversize_turned"):
+        # The failure says whether the turn was checked: not at all without cuTAMP's release joints, else which one.
+        report = "방향 검사 없음" if failure == "oversize" else r"방향 후보 2개 중 J6 .*° 선택, 예상 벗어남 \+\d+ mm"
+        with pytest.raises(upstream.solver.MotionPlanningError, match=rf"footprint.*overhang \d+ mm, allowed 25 mm\) · {report}"):
             run()
         assert not mg.attached and not hasattr(obstacle, "old_get_bounding_spheres")
         return
     result = run()
-    assert [step["label"] for step in result] == [step["label"] for step in completed_plan()["steps"]]
+    expected_labels = [step["label"] for step in completed_plan()["steps"]]
+    if failure in ("joined_pick", "joined_all"):
+        expected_labels.remove("Pick.descend")  # the descent lives inside Pick.approach, which ends at the grasp
+    if failure in ("joined_carry", "joined_all"):
+        expected_labels.remove("Place.lift")  # the lift lives inside Place.transport, which starts at the grasp
+    assert [step["label"] for step in result] == expected_labels
     assert attachments == [True] and not mg.attached
     if failure == "attached_collision":
         # cuTAMP retries the first lift once with the picked object detached, then carries it again.
-        assert [attached for attached, _, _ in calls] == [False,False,True,True,True,True,False]
-        assert sphere_states == [False,False,True,False,True,True,False]
-        assert [speed for _, _, speed in calls] == [1.0] * 7
+        assert [attached for attached, _, _ in calls] == [False,False,True,True,True]
+        assert sphere_states == [False,False,True,False,True]
+        assert [speed for _, _, speed in calls] == [1.0] * 5
         return
-    assert [attached for attached, _, _ in calls] == [False,False,True,True,True,False]
-    assert [speed for _, _, speed in calls] == [1.0] * 6
-    assert result[5]["placement_check"]["release_height_m"] == pytest.approx(.05, abs=1e-6)
-    assert result[1]["dt"] == pytest.approx(.02*.9)
-    assert result[4]["dt"] == pytest.approx(.02*.9)
+    # Neither the descent to the placement pose nor the retract after the release is planned: the carry ends
+    # 2 cm above the placement pose, the object is released there and Home starts from it.
+    assert [attached for attached, _, _ in calls] == [False,False,True,True]
+    assert [speed for _, _, speed in calls] == [1.0] * 4
+    assert [step["label"] for step in result][-3:] == ["Place.transport", "Place.open", "Home"]
+    transport = next(step for step in result if step["label"] == "Place.transport")
+    assert transport["placement_check"]["release_height_m"] == pytest.approx(.05 + .02, abs=1e-6)
+    before_close = result[expected_labels.index("Pick.close") - 1]
+    assert "grasp_target_world_from_tcp" in before_close
+    assert before_close["dt"] == pytest.approx(.02*.9)
+    assert transport["dt"] == pytest.approx(.02*.9)
+    if failure in ("joined_pick", "joined_all"):
+        assert len(result[0]["plan"].position) == 7  # approach 4 + descent 4 samples, sharing the stop
+    if failure in ("joined_carry", "joined_all"):
+        assert len(transport["plan"].position) == 7  # lift 4 + transport 4 samples, sharing the stop
+    assert turns == ([pytest.approx(-1.0)] if failure == "turned_release" else [])
     assert not hasattr(obstacle, "old_get_bounding_spheres")
     assert torch.equal(particle["q0"], torch.tensor([0.,.9,.6,0,0,0]))
 
@@ -369,5 +519,23 @@ def test_placement_preview_projects_physical_box_and_release_height_separately(t
     vertices = np.asarray(box["vertices"])
     assert vertices[:,2].max() == .15 and vertices[:,2].min() == 0
     assert box["collision_mesh"] and box["source"] == "configured"
+    assert stored["placement"]["top"] != stored["placement"]["release"]
+    assert np.asarray(stored["placement"]["top"]).min() >= 0
+
+
+def test_fixed_box_placement_preview_projects_physical_box_and_release_height_separately(scene, tmp_path):
+    import json
+    from tiptop.perception_preview import TaskPreview
+
+    env, observed, full = scene
+    _, region = prepare_task_environment(env, observed, TaskSettings(preset="fixed_box", release_height_m=.05), fixed_obstacles=[full])
+    preview = TaskPreview(tmp_path, observation_id="offline", task="test", depth_source="saved")
+    preview.update("observation", dict(rgb=np.zeros((720,1280,3), np.uint8)))
+    camera = np.diag([-1., 1., -1., 1.])
+    camera[:3, 3] = [0., .76, 1.025]
+    k = np.array([[610.,0,638.], [0,610.,361.], [0,0,1.]])
+    preview.placement(region, camera, k)
+    stored = json.loads((preview.directory / "state.json").read_text())
+    assert stored["placement"]["region"]["release_bottom_z_m"] == pytest.approx(.20)
     assert stored["placement"]["top"] != stored["placement"]["release"]
     assert np.asarray(stored["placement"]["top"]).min() >= 0

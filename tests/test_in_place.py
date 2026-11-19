@@ -33,11 +33,11 @@ def test_boundary_residue_is_removed_only_at_a_stationary_initial_hold():
 
 def test_terminal_velocity_up_to_the_default_tolerance_is_zeroed_and_more_is_rejected():
     raw = path()
-    raw.velocity[-1, 0] = .0047
+    raw.velocity[-1, 0] = .0147
     clean = stationary_boundaries(raw)
     assert torch.count_nonzero(clean.velocity[[0, -1]]) == 0
     assert torch.equal(clean.position, raw.position)
-    raw.velocity[-1, 0] = .0051
+    raw.velocity[-1, 0] = .0151
     with pytest.raises(ValueError, match='final'):
         stationary_boundaries(raw)
 

@@ -5,6 +5,8 @@ import time
 
 import numpy as np
 
+from tiptop.robot_limits import load_robot_limits
+
 _log = logging.getLogger(__name__)
 
 
@@ -25,13 +27,15 @@ SPEED_FACTOR = 1.0  # every planned leg runs at the planner's full speed
 HOME_DROP_OFFSET_M = 0.05  # cuTAMP's fixed approach and retract offset, used by `home_drop`
 
 
-def stationary_boundaries(path, *, terminal_velocity_tolerance_rad_s=5e-3):
+def stationary_boundaries(path, *, terminal_velocity_tolerance_rad_s=None):
     """Remove only boundary finite-difference residues at an initial hold.
 
     cuRobo can report a small initial velocity despite two coincident initial
     positions.
     All positions, interior velocities and sample times are preserved.
     """
+    if terminal_velocity_tolerance_rad_s is None:
+        terminal_velocity_tolerance_rad_s = load_robot_limits()["terminal_velocity_tolerance_rad_s"]
     result = path.clone()
     if bool((result.velocity[-1].abs() > terminal_velocity_tolerance_rad_s).any()):
         raise ValueError("Nonstationary final trajectory boundary")

@@ -217,6 +217,13 @@ def completed_plan():
     ], supplied_candidate_ids=[9999])
 
 
+def test_final_grasp_is_the_end_of_the_joined_pick_approach():
+    plan = completed_plan()
+    del plan["steps"][1]
+    plan["steps"][0]["positions"] = [[0.]*6, [.3]*6]
+    np.testing.assert_array_equal(final_grasp_joints(plan), [.3]*6)
+
+
 def test_final_grasp_comes_from_commanded_endpoint_and_preserves_archived_candidates(tmp_path):
     preview = snapshot(tmp_path)
     candidate = dict(id=9999, score=1., axes=[[99, 99]]*4, outlines=[])

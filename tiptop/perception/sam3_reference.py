@@ -13,6 +13,7 @@ import aiohttp
 import numpy as np
 
 from tiptop.console import log_tag
+from tiptop.perception.mask_cleanup import drop_stray_pieces
 from tiptop.object_catalog import registered_object
 
 _log = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ def unpack_reference_packet(packet, rgb_shape, class_id):
         or metadata.get("class_id") != class_id
     ):
         raise ValueError("SAM3 returned invalid or mismatched detection data")
+    masks = np.stack([drop_stray_pieces(mask[0])[None] for mask in masks]) if n else masks
     return masks, boxes, scores, metadata
 
 

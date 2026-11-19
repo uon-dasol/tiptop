@@ -29,17 +29,19 @@ class KnownTaskPlanningSettings:
     motion_position_tolerance_m: float = 0.01
     motion_rotation_tolerance: float = 0.1
     max_wrist_travel_deg: float = 90.0
+    footprint_overhang_tolerance_mm: float = 25.0  # how far the released object's footprint may reach past the box top
     min_table_clearance_m: float = 0.010
     min_engagement_depth_m: float = 0.020
     num_particles: int = 32  # most IK-feasible grasps handed to cuTAMP; each gets one particle
     robot_world_tolerance_m: float = 0.01  # summed overlap depth of robot spheres into obstacles that cuTAMP accepts
 
     def __post_init__(self):
-        values = [value for name, value in asdict(self).items() if name != "min_engagement_depth_m"]
+        optional_zero = ("min_engagement_depth_m", "footprint_overhang_tolerance_mm")
+        values = [value for name, value in asdict(self).items() if name not in optional_zero]
         if not np.isfinite(values).all() or min(values) <= 0:
             raise ValueError("Planning time and tolerances must be finite and positive")
-        if not np.isfinite(self.min_engagement_depth_m) or self.min_engagement_depth_m < 0:
-            raise ValueError("Minimum engagement depth must be finite and not negative")
+        if not all(np.isfinite(getattr(self, name)) and getattr(self, name) >= 0 for name in optional_zero):
+            raise ValueError("Minimum engagement depth and footprint overhang tolerance must be finite and not negative")
         if not isinstance(self.num_particles, int) or self.num_particles < 1:
             raise ValueError("num_particles must be a positive integer")
 
@@ -511,7 +513,7 @@ def plan_known_task(
         raise RuntimeError(f"Existing cuTAMP found no complete {task.preset} plan: {failure}")
     serialized = serialize_plan(plan, observation.q_init)
     for step in plan:
-        if step.get("label") == "Pick.descend" and "grasp_target_world_from_tcp" in step:
+        if "grasp_target_world_from_tcp" in step:
             serialized["selected_grasp"] = dict(
                 world_from_tcp=step["grasp_target_world_from_tcp"], source="completed_motion_plan",
                 db=selected_db_row(entry["db"], data["candidate_indices"][selected], tcp[selected],
@@ -548,7 +550,7 @@ def plan_known_task(
     else:
         check_name = "placement_check"
         return_check = validate_place_plan(serialized, tcp_at, pose, hull.vertices, region,
-                                          position_tolerance_m=settings.motion_position_tolerance_m)
+                                          overhang_tolerance_mm=settings.footprint_overhang_tolerance_mm)
     serialized[check_name] = return_check
     collision_registration = dict(
         surrounding_obstacles=visual.get("surrounding_obstacles", True),

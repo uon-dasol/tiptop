@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from tiptop.perception import sam2, sam3_reference as reference
+from tiptop.perception.mask_cleanup import drop_stray_pieces
 from tiptop.perception.cameras.frame import Frame
 from tiptop.perception_wrapper import run_visual_perception
 
@@ -63,6 +64,27 @@ def test_all_instances_are_retained_with_unique_labels_and_original_coordinates(
     assert all(box["class_id"] == "black_pepper_shaker" for box in result["bboxes"])
     np.testing.assert_array_equal(result["masks"], packet()["masks"])
     assert result["grounded_atoms"] == [dict(predicate="on", args=["black_pepper_shaker__instance_1", "table"])]
+
+
+def test_stray_mask_pieces_are_dropped_but_large_secondary_pieces_stay():
+    mask = np.zeros((40, 60), bool)
+    mask[5:25, 5:25] = True          # main piece, 400 px
+    mask[35:37, 50:52] = True        # 4 px far away: stray
+    mask[5:13, 40:50] = True         # 80 px, 20% of the main piece: kept
+    cleaned = drop_stray_pieces(mask)
+    assert not cleaned[35:37, 50:52].any() and cleaned[5:13, 40:50].all() and cleaned[5:25, 5:25].all()
+    single = np.zeros((10, 10), bool)
+    single[2:5, 2:5] = True
+    assert drop_stray_pieces(single) is single  # one piece, nothing to do
+
+
+def test_reference_packet_masks_come_out_without_stray_pixels():
+    data = packet(40, 60)
+    data["masks"][0, 0, :20, :30] = True   # a 600-pixel instance
+    data["masks"][0, 0, 39, 59] = True     # a lone pixel at the far corner
+    masks = reference.unpack_reference_packet(data, (40, 60, 3), "black_pepper_shaker")[0]
+    assert masks[0, 0, :20, :30].all() and not masks[0, 0, 39, 59]
+    np.testing.assert_array_equal(masks[1], data["masks"][1])
 
 
 @pytest.mark.parametrize("change", ["missing", "resolution", "class", "score", "mask", "box"])

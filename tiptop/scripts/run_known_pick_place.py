@@ -745,7 +745,7 @@ def parse_args(argv=None):
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", default="후추통 집고 박스에 놓아")
-    parser.add_argument("--task-preset", choices=list(TASK_PRESETS), default="home_drop",
+    parser.add_argument("--task-preset", choices=list(TASK_PRESETS), default="fixed_box",
                         help="Placement task independent of --perception-mode")
     parser.add_argument("--fixed-box-present", action="store_true", default=TaskSettings().fixed_box_present,
                         help=argparse.SUPPRESS)  # Legacy positive flag; installed geometry cannot be disabled.
@@ -840,6 +840,9 @@ def parse_args(argv=None):
     parser.add_argument("--max-wrist-travel-deg", type=float, default=defaults.max_wrist_travel_deg,
                         help="Reject a planned leg whose J4 or J5 moves farther than this from its start, degrees "
                              "(default: 90)")
+    parser.add_argument("--footprint-overhang-tolerance-mm", type=float, default=defaults.footprint_overhang_tolerance_mm,
+                        help="fixed_box: how far the released object's CAD footprint may reach past the box top, "
+                             "millimetres (default: 25)")
     parser.add_argument("--min-table-clearance-m", type=float, default=defaults.min_table_clearance_m,
                         help="Minimum distance of the open gripper spheres above the support plane (estimated "
                              "tabletop + 20 mm), metres (default: 0.01)")

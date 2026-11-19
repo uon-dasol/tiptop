@@ -161,6 +161,7 @@ def test_all_reference_masks_become_hulls_with_only_the_selected_target_movable(
         dict(motion_position_tolerance_m=-0.01),
         dict(motion_rotation_tolerance=float("inf")),
         dict(max_wrist_travel_deg=0),
+        dict(footprint_overhang_tolerance_mm=-1),
         dict(max_wrist_travel_deg=float("inf")),
         dict(min_table_clearance_m=0),
         dict(min_table_clearance_m=float("nan")),

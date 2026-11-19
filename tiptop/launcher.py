@@ -18,15 +18,13 @@ TABLE_SUPPORT = ("ransac-cad", "ransac-mask", "declared")
 
 _SAM3_ONLY = ["sam3_reference"]
 # hidden fields have no input box; their preset value still goes into the command.
-# show_modes limits where a field is displayed; its value still goes into every mode's command.
 FIELDS = (
     dict(key="task_preset", label="작업 프리셋", type="select", options=list(TASK_PRESETS),
-         option_labels={key: value["label"] for key, value in TASK_PRESETS.items()}, modes=None,
-         show_modes=["gemini_er"]),
+         option_labels={key: value["label"] for key, value in TASK_PRESETS.items()}, modes=None, hidden=True),
     dict(key="task", label="지시문", type="text", modes=None),
     dict(key="release_height_m", label="목적지 상단에서 놓는 높이 (m)", type="number", modes=None,
-         tasks=["perceived_surface"], hidden=True),
-    *[dict(key=key, label=label, type="number", modes=None, tasks=["home_drop"], hidden=True) for key, label in (
+         tasks=["fixed_box", "perceived_surface"], hidden=True),
+    *[dict(key=key, label=label, type="number", modes=None, tasks=["fixed_box", "home_drop"], hidden=True) for key, label in (
         ("box_center_x_m", "박스 중심 X (m)"), ("box_center_y_m", "박스 중심 Y (m)"),
         ("box_bottom_z_m", "박스 바닥 Z (m)"), ("box_size_x_m", "박스 X 길이 (m)"),
         ("box_size_y_m", "박스 Y 길이 (m)"), ("box_size_z_m", "박스 높이 (m)"),
@@ -40,6 +38,7 @@ FIELDS = (
     dict(key="cad_mask_min_iou", label="CAD-마스크 최소 IoU", type="number", modes=None),
     dict(key="min_table_clearance_m", label="최소 테이블 여유 (m)", type="number", modes=None),
     dict(key="max_wrist_travel_deg", label="최대 손목 이동 (deg)", type="number", modes=None),
+    dict(key="footprint_overhang_tolerance_mm", label="박스 윗면 이탈 허용 (mm)", type="number", modes=None),
     dict(key="min_engagement_depth_m", label="최소 파지 깊이 (m)", type="number", modes=None),
     dict(key="num_particles", label="후보 파지 수 (= 입자 수 상한)", type="number", modes=None),
     dict(key="sam3_confidence_threshold", label="SAM3 신뢰도 임계값 (초과한 후보만)", type="number", modes=_SAM3_ONLY),
@@ -134,7 +133,7 @@ def build_command(mode: str, values: dict, kind: str) -> list[str]:
         raise ValueError("table_support 'declared' needs a hardware_profile")
     if values.get("table_support") not in TABLE_SUPPORT:
         raise ValueError(f"table_support must be one of {TABLE_SUPPORT}")
-    preset = values.get("task_preset", "home_drop")
+    preset = values.get("task_preset", "fixed_box")
     task = TaskSettings(preset=preset)
     task.validate_perception_mode(mode)
     task.perception_instruction(_text(values, "task"))

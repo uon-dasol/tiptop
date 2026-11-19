@@ -1,6 +1,6 @@
 {
   "common": {
-    "task_preset": "home_drop",
+    "task_preset": "fixed_box",
     "task": "스팸 집고 박스에 놓아",
     "camera_url": "http://127.0.0.1:13348",
     "hardware_profile": "tiptop/config/m1013_fixed_hardware.declared.json",
@@ -9,6 +9,7 @@
     "cad_mask_min_iou": "0.75",
     "min_table_clearance_m": "0.005",
     "max_wrist_travel_deg": 90,
+    "footprint_overhang_tolerance_mm": 25,
     "min_engagement_depth_m": "0.02",
     "num_particles": "8",
     "table_support": "declared",

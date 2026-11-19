@@ -36,6 +36,9 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
 .launcher .run{background:#b3261e;border-color:#e5534b;color:#fff;font-weight:600}.launcher .run:hover:not(:disabled){background:#cf3a30;border-color:#ff8f80;color:#fff}.launcher .danger{border-color:#f7ad8c;color:#f7ad8c}.launcher .lsep{grid-column:1/-1;color:var(--muted);font-size:11px;letter-spacing:1px;border-top:1px solid var(--line);padding-top:8px}.tools{gap:14px;padding:14px 20px}.tools .group{gap:12px}.tools .check{font-size:13px}.tools .grasp-info{margin-left:auto;display:grid;gap:2px;text-align:right}.tools .grasp-info span{color:var(--muted);font-size:10px;letter-spacing:.7px}.tools .grasp-info strong{font:12px ui-monospace,monospace;color:var(--ink)}
 .launcher .ltop{grid-column:1/-1;display:grid;grid-template-columns:calc((100% + 14px)/3 - 7px) minmax(0,1fr);align-items:center}@media(max-width:900px){.launcher .ltop{display:flex;flex-wrap:wrap;gap:12px}}
 .launcher .lcol{display:flex;flex-direction:column;gap:8px}
+.launcher .push-right{margin-left:auto}dialog.limits{width:min(640px,94vw)}.limits-body{padding:18px 20px;display:grid;gap:14px}.limits-body .lrow{display:flex;gap:12px;align-items:center;justify-content:space-between}.limits-note{color:var(--muted);font-size:12px}.limits-body .msg{font-size:12px;color:#f7ad8c;min-height:16px}
+.limits-body table{border-collapse:collapse;width:100%}.limits-body th,.limits-body td{padding:4px 8px;text-align:left;font-size:13px;border-bottom:1px solid var(--line)}.limits-body th{color:var(--muted);font-weight:500;font-size:12px}
+.limits-body input[type=number]{background:#111718;color:var(--ink);border:1px solid #3c4845;border-radius:6px;padding:6px 8px;width:100%}.limits-body label.field{display:grid;gap:4px;color:var(--muted);font-size:12px}.limits-body td.over{color:#f7ad8c}
 .launcher .msg{font-size:12px;color:#f7ad8c;min-height:16px}
 .views{grid-template-columns:repeat(4,minmax(0,1fr))}.obstacle-controls{display:flex;gap:8px;align-items:center;font-size:11px}.obstacle-controls label{display:flex;gap:3px;align-items:center;white-space:nowrap}.obstacle-controls input{accent-color:var(--accent)}.obstacle-controls button{padding:4px 7px;font-size:11px}
 #obstaclePanel:fullscreen{display:flex;flex-direction:column;background:var(--bg);padding:20px}#obstaclePanel:fullscreen .viewport{flex:1;aspect-ratio:auto;min-height:0}#obstaclePanel:fullscreen .panel-title,#obstaclePanel:fullscreen .footer{flex-shrink:0}
@@ -57,7 +60,7 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
    <div class="lrow">
    <div class="seg" id="modeSeg"><button data-mode="gemini_er">Gemini</button><button data-mode="sam3_reference">SAM3</button></div>
    <button class="run" id="runBtn">실행</button><button class="danger" id="stopBtn" disabled>중단 (Ctrl+C)</button></div>
-   <span class="lrow" id="svc"></span></div>
+   <span class="lrow"><span class="lrow" id="svc"></span><button id="limitsBtn" class="push-right">로봇 파라미터</button></span></div>
   <aside class="lobjects hidden" id="objects"><div class="lobjects-title">물체 <span id="objCount"></span> · 클릭하면 지시문에 반영</div><div id="objList"></div></aside>
   <div class="lmain">
   <div class="lfields" id="lfields"></div>
@@ -76,6 +79,19 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
  <div class="subtitle" style="margin-top:10px">점: 열린 모델 손끝점 · 점선과 옅은 면: 같은 TCP 자세의 손가락 범위 (DB 기반)</div>
  <div class="bottom"><span>열린 UON 모델 손끝점 · <span class="finger1">손가락 1</span> / <span class="finger2">손가락 2</span> / <span class="finger3">손가락 3</span> · <span class="axis z">파랑: 접근축</span> · 흰 점: TCP</span><span id="directory">작업 관측 기준</span></div>
 </main>
+<dialog id="limitsDialog" class="limits" aria-labelledby="limitsTitle">
+ <div class="limits-body">
+  <div class="lrow"><strong id="limitsTitle">로봇 파라미터</strong><button id="limClose">닫기</button></div>
+  <div class="limits-note">계획(cuRobo)이 쓰는 값입니다. 저장하면 다음 작업의 계획부터 적용됩니다.</div>
+  <table id="limTable"><thead><tr><th>축</th><th>가속도 (rad/s²)</th><th>저크 (rad/s³)</th><th title="구간 끝에 남는 속도의 경험식 추정(0.00154 × 가속도)">예상 끝 잔여 속도</th></tr></thead><tbody></tbody></table>
+  <label class="check"><input type="checkbox" id="limAutoJerk" checked>가속도를 바꾸면 저크도 같은 비율로 자동 설정 (기본값 비율, 저크 = 가속도 × <span id="limRatio">32</span>)</label>
+  <label class="check"><input type="checkbox" id="limAutoTol" checked>가속도를 바꾸면 종단 속도 허용치도 자동 설정 (예상 끝 잔여 속도 최대값 × 1.3, 0.001 단위 올림)</label>
+  <label class="field">종단 속도 허용치 (rad/s) <input type="number" id="limTol" step="any"></label>
+  <div class="msg" id="limWarn"></div>
+  <div class="lrow"><button id="limReset">기본값으로 되돌리기</button><button id="limSave">이 값을 기본값으로 저장</button></div>
+  <div class="msg" id="limMsg"></div>
+ </div>
+</dialog>
 <dialog id="fingerDialog" aria-labelledby="fingerTitle">
  <div class="detail-head"><div><strong id="fingerTitle">선택 파지 · 열린 손가락 방향</strong><p id="fingerSource"></p></div><button id="closeFingerDetail" aria-label="손가락 확대 닫기">닫기 ×</button></div>
  <div class="detail-views"><div><div class="detail-caption">RGB 위의 선택 파지 · 모델 손끝점</div><canvas id="fingerRgb"></canvas></div><div><div class="detail-caption">같은 시점의 파지 범위 · 손끝점</div><canvas id="fingerOnly"></canvas></div></div>
@@ -371,7 +387,7 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
  function render(){
   const box=$('lfields'),taskLogBox=$('taskLog');box.replaceChildren();let stack=null,modeFields=null,modeTitle=null;
   for(const field of [...cfg.fields].sort((a,b)=>!!a.modes-!!b.modes)){
-   if(field.hidden||field.show_modes&&!field.show_modes.includes(mode)||field.modes&&!field.modes.includes(mode)||field.tasks&&!field.tasks.includes(values[mode].task_preset)&&!(field.key.startsWith('box_')&&values[mode].fixed_box_present))continue;
+   if(field.hidden||field.modes&&!field.modes.includes(mode)||field.tasks&&!field.tasks.includes(values[mode].task_preset)&&!(field.key.startsWith('box_')&&values[mode].fixed_box_present))continue;
    if(field.modes&&!modeFields){modeTitle=document.createElement('div');modeTitle.className='lsep mode-options-title';modeTitle.textContent=(mode==='sam3_reference'?'SAM3':'Gemini')+' 전용 설정';modeFields=document.createElement('div');modeFields.className='mode-fields';box.append(modeTitle,modeFields)}
    const label=document.createElement('label');let input;
    if(field.type==='checkbox'){
@@ -497,6 +513,41 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
    logNext=0;$('runLog').textContent='';setRunning(true);pollLog();
   }catch(error){$('runMsg').textContent=error.message}
  }
+ const RESIDUAL_PER_ACCEL=0.00154;let limData=null,limAcc=[],limJerk=[];
+ function limRender(values){
+  const body=$('limTable').tBodies[0];body.replaceChildren();limAcc=[];limJerk=[];
+  for(let i=0;i<6;i++){const row=body.insertRow();row.insertCell().textContent='J'+(i+1);
+   for(const [key,list] of [['max_acceleration',limAcc],['max_jerk',limJerk]]){const input=document.createElement('input');input.type='number';input.step='any';input.value=values[key][i];input.addEventListener('input',key==='max_acceleration'?()=>limAccelChanged(i):limCheck);row.insertCell().append(input);list.push(input)}
+   row.insertCell()}
+  $('limTol').value=values.terminal_velocity_tolerance_rad_s;limCheck();
+ }
+ function limAccelChanged(index){
+  const ratio=limData.defaults.max_jerk[0]/limData.defaults.max_acceleration[0],accel=parseFloat(limAcc[index].value);
+  if($('limAutoJerk').checked&&Number.isFinite(accel))limJerk[index].value=Number((accel*ratio).toFixed(1));
+  if($('limAutoTol').checked){const worst=Math.max(...limAcc.map(input=>parseFloat(input.value)));if(Number.isFinite(worst))$('limTol').value=Number((Math.ceil(RESIDUAL_PER_ACCEL*worst*1.3*1000-1e-9)/1000).toFixed(3))}
+  limCheck();
+ }
+ function limValues(){return{max_acceleration:limAcc.map(input=>parseFloat(input.value)),max_jerk:limJerk.map(input=>parseFloat(input.value)),terminal_velocity_tolerance_rad_s:parseFloat($('limTol').value)}}
+ function limCheck(){
+  const values=limValues(),tolerance=values.terminal_velocity_tolerance_rad_s;let over=[];
+  [...$('limTable').tBodies[0].rows].forEach((row,i)=>{const cell=row.cells[3],estimate=RESIDUAL_PER_ACCEL*values.max_acceleration[i];
+   cell.textContent=Number.isFinite(estimate)?estimate.toFixed(4):'';cell.className=estimate>tolerance?'over':'';if(estimate>tolerance)over.push('J'+(i+1))});
+  $('limWarn').textContent=over.length?over.join(', ')+': 예상 끝 잔여 속도가 종단 속도 허용치보다 커서 계획 후보가 거부될 수 있습니다.':'';
+ }
+ $('limitsBtn').addEventListener('click',async()=>{
+  $('limMsg').textContent='';
+  try{limData=await api('/api/robot-limits');$('limRatio').textContent=Number((limData.defaults.max_jerk[0]/limData.defaults.max_acceleration[0]).toFixed(1));limRender(limData.limits);$('limitsDialog').showModal()}
+  catch(error){$('runMsg').textContent=error.message}
+ });
+ $('limClose').addEventListener('click',()=>$('limitsDialog').close());
+ $('limReset').addEventListener('click',async()=>{
+  try{limData=await api('/api/robot-limits');limRender(limData.limits);$('limMsg').textContent='저장된 기본값을 불러왔습니다.'}
+  catch(error){$('limMsg').textContent=error.message}
+ });
+ $('limSave').addEventListener('click',async()=>{
+  try{const saved=await api('/api/robot-limits/save',{limits:limValues()});limData.limits=saved.limits;limRender(saved.limits);$('limMsg').textContent='저장했습니다. 다음 작업의 계획부터 적용됩니다.'}
+  catch(error){$('limMsg').textContent=error.message}
+ });
  $('runBtn').addEventListener('click',run);
  $('stopBtn').addEventListener('click',async()=>{try{await api('/api/stop',{})}catch(error){$('runMsg').textContent=error.message}});
  $('rgbTask').addEventListener('input',event=>{values[mode].task=event.target.value;const main=$('taskInput');if(main)main.value=event.target.value;markObject();schedulePreview()});

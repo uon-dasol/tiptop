@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from tiptop.launcher import FIELDS, KINDS, MODES, PRESETS_PATH, load_presets, save_preset
 from tiptop.object_catalog import demo_order, load_catalog
+from tiptop.robot_limits import BOUNDS, DEFAULTS, load_robot_limits, save_robot_limits
 from tiptop.task_result_log import set_task_mark, task_log_rows
 from tiptop.run_manager import RunManager
 
@@ -70,7 +71,7 @@ def snapshot_rgb_camera(data, task_output):
         return None
 
 
-def make_server(root, *, port=8091, task_output=None, launcher=None, presets_path=PRESETS_PATH):
+def make_server(root, *, port=8091, task_output=None, launcher=None, presets_path=PRESETS_PATH, limits_path=None):
     root = Path(root).resolve()
     fixed = Path(task_output).resolve() if task_output else None
     if fixed is not None and not fixed.is_relative_to(root):
@@ -81,6 +82,10 @@ def make_server(root, *, port=8091, task_output=None, launcher=None, presets_pat
     def handle_api(method, path, query, body):
         if method == "GET" and path == "/api/presets":
             return 200, dict(fields=FIELDS, modes=list(MODES), kinds=list(KINDS), **load_presets(presets_path))
+        if method == "GET" and path == "/api/robot-limits":
+            return 200, dict(limits=load_robot_limits(limits_path), defaults=DEFAULTS, bounds=BOUNDS)
+        if method == "POST" and path == "/api/robot-limits/save":
+            return 200, dict(limits=save_robot_limits(body["limits"], limits_path))
         if method == "GET" and path == "/api/task-log":
             return 200, dict(rows=task_log_rows())
         if method == "POST" and path == "/api/task-log/mark":

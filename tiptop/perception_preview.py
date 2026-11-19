@@ -490,7 +490,7 @@ class TaskPreview:
             final.pop("id")
             final.pop("score")
             final.update(joint_positions_rad=q.tolist(), world_from_tcp=tcp.tolist(),
-                         source_step="Pick.descend", before_action="Pick.close")
+                         source_step=final_grasp_step(plan)["label"], before_action="Pick.close")
             if self.side_frame is not None:
                 final["side"] = self._side_grasp(tcp)
             self._attach_final_db_boxes(final, plan, world_from_cam, intrinsics)
@@ -499,15 +499,20 @@ class TaskPreview:
             _log.warning("Perception viewer final plan projection skipped: %s", error)
 
 
-def final_grasp_joints(plan):
-    """The execution endpoint before close is authoritative, not DB scores or IK seeds."""
+def final_grasp_step(plan):
+    """The trajectory step that ends at the grasp, right before Pick.close."""
     for i, step in enumerate(plan["steps"]):
         if step.get("label") == "Pick.close" and step.get("action") == "close":
             previous = plan["steps"][i-1] if i else {}
-            if previous.get("type") != "trajectory" or previous.get("label") != "Pick.descend":
-                raise ValueError("Final grasp must come from the Pick.descend trajectory before Pick.close")
-            return np.asarray(previous["positions"][-1], float)
+            if previous.get("type") != "trajectory" or previous.get("label") not in ("Pick.descend", "Pick.approach"):
+                raise ValueError("Final grasp must come from the Pick trajectory before Pick.close")
+            return previous
     raise ValueError("No final Pick.close in the completed plan")
+
+
+def final_grasp_joints(plan):
+    """The execution endpoint before close is authoritative, not DB scores or IK seeds."""
+    return np.asarray(final_grasp_step(plan)["positions"][-1], float)
 
 
 def preview_saved_task(output):

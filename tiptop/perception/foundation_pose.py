@@ -8,6 +8,7 @@ import aiohttp
 import numpy as np
 
 from tiptop.perception.cameras.geometry import _rigid_transform
+from tiptop.perception.mask_cleanup import drop_stray_pieces
 from tiptop.serialization import savez_fast
 
 _log = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ _log = logging.getLogger(__name__)
 async def estimate_pose(session, server_url, frame, depth, mask, *, mesh_path, mesh_scale, class_id, world_from_cam):
     started = time.perf_counter()
     depth = np.asarray(depth, np.float32)
-    mask = np.asarray(mask, bool)
+    mask = drop_stray_pieces(np.asarray(mask, bool))
     world_cam = _rigid_transform(world_from_cam, "world_from_cam")
     k = np.asarray(frame.intrinsics)
     if (

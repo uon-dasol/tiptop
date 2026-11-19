@@ -936,6 +936,7 @@ robot_cfg:
       - 1.0
       - 1.0
       - 1.0
-      max_jerk: 100.0
-      max_acceleration: 3.0
+      # The six arm entries are replaced at load time by tiptop/robot_limits.py (UI-saved values or its defaults).
+      max_jerk: [160.0, 160.0, 160.0, 160.0, 160.0, 224.0, 160.0]
+      max_acceleration: [5.0, 5.0, 5.0, 5.0, 5.0, 7.0, 5.0]
       position_limit_clip: 0.0

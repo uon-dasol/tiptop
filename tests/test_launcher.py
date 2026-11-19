@@ -20,7 +20,7 @@ TASK = "car_leather_conditioner_bottle 집고 박스에 놓아"
 COMMON = [
     "--task", TASK, "--task-preset", "home_drop",
     "--max-approach-tilt-deg", "20", "--cad-mask-min-iou", "0.6", "--min-table-clearance-m", "0.01",
-    "--max-wrist-travel-deg", "90", "--min-engagement-depth-m", "0.02", "--num-particles", "32",
+    "--max-wrist-travel-deg", "90", "--footprint-overhang-tolerance-mm", "25", "--min-engagement-depth-m", "0.02", "--num-particles", "32",
     "--table-support", "declared",
 ]
 
@@ -30,7 +30,7 @@ FIXED_PRESETS = dict(
         task=TASK, task_preset="home_drop", camera_url="http://127.0.0.1:13348", hardware_profile="tiptop/config/m1013_fixed_hardware.declared.json",
         box_center_x_m=0, box_center_y_m=.31, box_bottom_z_m=0, box_size_x_m=.24, box_size_y_m=.15, box_size_z_m=.11,
         gateway_url="http://127.0.0.1:8090", max_approach_tilt_deg=20, cad_mask_min_iou=0.6, min_table_clearance_m=0.01,
-        max_wrist_travel_deg=90, min_engagement_depth_m=0.02, num_particles=32, table_support="declared", viewer=True,
+        max_wrist_travel_deg=90, footprint_overhang_tolerance_mm=25, min_engagement_depth_m=0.02, num_particles=32, table_support="declared", viewer=True,
     ),
     sam3_reference=dict(
         worker_socket="/tmp/tiptop-{uid}/known-task.sock", reference_scene="Lab/Uon_1F_Lab/table",
@@ -78,15 +78,20 @@ def test_minimal_records_flag_is_sent_only_in_demo_mode_and_not_for_checks():
     assert "--minimal-records" not in build_command("sam3_reference", values, "check")
 
 
-def test_task_preset_is_only_shown_in_gemini_mode_but_still_sent():
+def test_task_preset_is_hidden_in_both_modes_but_still_sent():
     field = next(field for field in FIELDS if field["key"] == "task_preset")
-    assert field["show_modes"] == ["gemini_er"]
-    assert arguments("sam3_reference", "plan")[arguments("sam3_reference", "plan").index("--task-preset") + 1] == "home_drop"
+    assert field["hidden"]
+    for mode in ("sam3_reference", "gemini_er"):
+        command = arguments(mode, "plan")
+        assert command[command.index("--task-preset") + 1] == "fixed_box"
 
 
-def test_home_drop_is_the_default_preset():
-    command = arguments("sam3_reference", "plan")
-    assert command[command.index("--task-preset") + 1] == "home_drop"
+def test_putting_the_object_in_the_fixed_box_is_the_default_preset():
+    from tiptop.task_presets import TASK_PRESETS, TaskSettings
+
+    assert TaskSettings().preset == "fixed_box" and TASK_PRESETS["fixed_box"]["label"] == "박스에 놓기"
+    assert TASK_PRESETS["home_drop"]["label"] == "초기 위치에서 박스에 놓기"
+    assert load_presets()["presets"]["sam3_reference"]["task_preset"] == "fixed_box"
 
 
 def test_options_of_the_other_mode_and_gateway_are_left_out_of_planning_runs():
@@ -250,6 +255,19 @@ def test_api_needs_the_token_a_same_origin_request_and_a_launcher(viewer, tmp_pa
     read_only = viewer(None)
     assert request(read_only, "GET", "/api/presets", token=read_only.launcher_token)[0] == 403
     assert read_only.launcher_token == ""
+
+
+def test_robot_limits_api_returns_defaults_saves_and_rejects_bad_values(viewer):
+    server = viewer(RunManager(ROOT, build=python_command("pass")))
+    token = server.launcher_token
+    status, data = request(server, "GET", "/api/robot-limits", token=token)
+    document = json.loads(data)
+    assert status == 200 and document["limits"] == document["defaults"]
+    limits = dict(document["limits"], max_acceleration=[6.0] * 6)
+    assert request(server, "POST", "/api/robot-limits/save", body=dict(limits=limits), token=token)[0] == 200
+    assert json.loads(request(server, "GET", "/api/robot-limits", token=token)[1])["limits"]["max_acceleration"] == [6.0] * 6
+    assert request(server, "POST", "/api/robot-limits/save", body=dict(limits=dict(limits, max_jerk=[1.0])), token=token)[0] == 400
+    assert request(server, "GET", "/api/robot-limits")[0] == 403
 
 
 def test_object_list_follows_the_catalog_order(viewer):

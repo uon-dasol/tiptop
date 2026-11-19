@@ -166,7 +166,7 @@ def cached_hardware_model(profile, record_dir=None):
     The key covers the reviewed profile and the original model files. `record_dir` receives a copy of the
     generated files so a task folder still shows the model it used.
     """
-    from tiptop.doosan.model import ASSETS
+    from tiptop.doosan.model import ASSETS, apply_robot_limits
 
     digest = hashlib.sha256(hardware_profile_fingerprint(profile).encode())
     for name in ("m1013_uon.urdf", "m1013_uon.yml"):
@@ -176,7 +176,8 @@ def cached_hardware_model(profile, record_dir=None):
     if key not in _PREPARED:
         _PREPARED[key] = prepare_hardware_model(profile, folder)
     cached = _PREPARED[key]
-    prepared = dict(cached, robot_config=deepcopy(cached["robot_config"]),
+    # The built config keeps the limits of its first build; saved limits can change while the process runs.
+    prepared = dict(cached, robot_config=apply_robot_limits(deepcopy(cached["robot_config"])),
                     fixed_obstacles=deepcopy(cached["fixed_obstacles"]), gripper_spheres=cached["gripper_spheres"].copy())
     if record_dir is not None:
         shutil.copytree(folder, record_dir, dirs_exist_ok=True)

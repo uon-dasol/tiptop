@@ -17,6 +17,7 @@ from tiptop.doosan.hardware import (
     prepare_hardware_model,
     validate_hardware_observation,
 )
+from tiptop.robot_limits import DEFAULTS, save_robot_limits
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "tiptop/doosan/assets/m1013_uon"
@@ -307,7 +308,9 @@ def test_cached_hardware_model_is_built_once_per_profile_and_records_a_copy(tmp_
         built.append(Path(output))
         Path(output).mkdir(parents=True, exist_ok=True)
         (Path(output) / "robot.yml").write_text("robot")
-        return dict(robot_config={"robot_cfg": {}}, fixed_obstacles=[[1]], gripper_spheres=np.zeros((2, 4)))
+        cspace = dict(max_acceleration=[1.0] * 7, max_jerk=[2.0] * 7)
+        return dict(robot_config={"robot_cfg": {"kinematics": {"cspace": cspace}}}, fixed_obstacles=[[1]],
+                    gripper_spheres=np.zeros((2, 4)))
 
     monkeypatch.setattr(hardware_module, "HARDWARE_CACHE", tmp_path / "cache")
     monkeypatch.setattr(hardware_module, "prepare_hardware_model", fake_prepare)
@@ -318,6 +321,10 @@ def test_cached_hardware_model_is_built_once_per_profile_and_records_a_copy(tmp_
     first["gripper_spheres"][:] = 1
     second = cached_hardware_model(profile)
     assert len(built) == 1 and second["fixed_obstacles"] == [[1]] and not second["gripper_spheres"].any()
+    # Limits saved after the model was built still reach the next task, keeping the locked gripper entry.
+    save_robot_limits(dict(DEFAULTS, max_acceleration=[9.0] * 6))
+    cspace = cached_hardware_model(profile)["robot_config"]["robot_cfg"]["kinematics"]["cspace"]
+    assert cspace["max_acceleration"] == [9.0] * 6 + [1.0] and cspace["max_jerk"][:6] == DEFAULTS["max_jerk"]
     assert (tmp_path / "task-1/hardware-model/robot.yml").read_text() == "robot"
     assert not (tmp_path / "task-2").exists()
     cached_hardware_model(dict(profile, tool=dict(a=2)))
