@@ -178,12 +178,12 @@ async def serve_worker(path, worker, *, ready=None):
             path.unlink()
         server = None
         try:
-            server = await asyncio.start_unix_server(worker.handle, path=str(path), limit=65536)
-            path.chmod(0o600)
             started = time.perf_counter()
             preparation = None
             if ready is not None:
                 preparation = ready()
+            server = await asyncio.start_unix_server(worker.handle, path=str(path), limit=65536)
+            path.chmod(0o600)
             summary = ''
             if isinstance(preparation, dict) and 'objects' in preparation:
                 count = len(preparation['objects'])

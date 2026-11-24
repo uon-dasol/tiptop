@@ -252,7 +252,7 @@ def run(args):
                         'projected_joint_reaction_nm': float(projected[self.spinner]),
                         'actual_motor_torque_nm': None})
 
-            def close_gripper(self, speed=1.0, force=.1):
+            def close_gripper(self, speed=1.0, force=.1, effort_counts=None):
                 def close():
                     start = self.get_state()['gripper']['position_rad']
                     peak, stopped = np.zeros(3), False

@@ -191,7 +191,8 @@ class IsaacPlanClient:
     def open_gripper(self, speed=1.0, force=0.1):
         return self._gripper('open', speed, force)
 
-    def close_gripper(self, speed=1.0, force=0.1):
+    def close_gripper(self, speed=1.0, force=0.1, effort_counts=None):
+        # effort_counts is the real driver's closing current; the simulated spinner keeps its fixed torque cap.
         return self._gripper('close', speed, force)
 
 

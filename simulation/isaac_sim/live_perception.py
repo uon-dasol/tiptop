@@ -272,7 +272,7 @@ try:
                     entry['max_displacement_m'] = max(entry['max_displacement_m'], displacement)
                     if displacement > .005:
                         raise RuntimeError('A non-target object moved more than 5 mm')
-        def close_gripper(self, speed=1., force=.1):
+        def close_gripper(self, speed=1., force=.1, effort_counts=None):
             def close():
                 # Same fixed 5 Nm cap and position closing as previous contact trials.
                 # Contact is checked for completion; there is no force-maintenance controller.

@@ -156,11 +156,18 @@ def test_private_socket_ready_and_shutdown_cleanup(tmp_path, capsys):
         async def run(args):
             return dict(success=True)
         worker=TaskWorker(parse,run)
+        socket_during_preparation=[]
         def prepared():
+            socket_during_preparation.append(path.exists())
             ready.set()
             return dict(objects=[{},{}])
         server=asyncio.create_task(serve_worker(path,worker,ready=prepared))
         await asyncio.wait_for(ready.wait(),timeout=5)
+        for _ in range(500):
+            if path.exists() and path.stat().st_mode & 0o777 == 0o600:
+                break
+            await asyncio.sleep(0.01)
+        assert socket_during_preparation==[False]
         assert path.stat().st_mode & 0o777 == 0o600
         reader,writer=await connect(path,['--task',T('A'),'--perception-mode','sam3_reference'])
         assert (await result(reader))[0]['success']
