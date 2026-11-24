@@ -30,8 +30,9 @@ def quintic_connection(start, end, steps, dt):
 
 
 def blend_legs(first, first_velocity, second, second_velocity, dt, first_tcp, second_tcp, *,
-                    radius_m=DEFAULT_BLEND_RADIUS_M, max_steps=120):
-    """Cut both legs `radius_m` from their shared stop and join the cut ends with one smooth connection.
+               radius_m=DEFAULT_BLEND_RADIUS_M, second_radius_m=None, max_steps=120):
+    """Cut the first leg `radius_m` and the second `second_radius_m` (default `radius_m`) from their shared stop and
+    join the cut ends with one smooth connection.
 
     `first` and `second` are joint positions [N, dof] sampled every `dt` with their velocities; `second` starts
     where `first` stops.
@@ -48,7 +49,7 @@ def blend_legs(first, first_velocity, second, second_velocity, dt, first_tcp, se
     limits = [np.maximum(np.abs(x).max(0), np.abs(y).max(0)) for x, y in ((v1, v2), (a1, a2), tuple(jerk))]
     stop = first_tcp[-1]
     cut_first = np.flatnonzero(np.linalg.norm(first_tcp - stop, axis=1) >= radius_m)
-    cut_second = np.flatnonzero(np.linalg.norm(second_tcp - stop, axis=1) >= radius_m)
+    cut_second = np.flatnonzero(np.linalg.norm(second_tcp - stop, axis=1) >= (second_radius_m or radius_m))
     if len(cut_first) == 0 or len(cut_second) == 0:
         return None
     i, j = int(cut_first[-1]), int(cut_second[0])

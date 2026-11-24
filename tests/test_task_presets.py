@@ -445,7 +445,7 @@ def test_existing_solver_generates_pick_attached_transport_release_and_home(upst
     if joins:
         attempts = []
 
-        def join(motion_gen, first, second):
+        def join(motion_gen, first, second, *, second_radius_m=None):
             attempts.append(None)
             if len(attempts) - 1 not in joins:
                 return None

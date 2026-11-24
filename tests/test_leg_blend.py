@@ -52,3 +52,13 @@ def test_blend_refuses_legs_that_do_not_meet():
 def test_blend_returns_none_when_the_legs_are_too_short_to_cut():
     first, v1, second, v2, tcp = legs()
     assert blend_legs(first, v1, second, v2, DT, tcp(first), tcp(second), radius_m=5.0) is None
+
+
+def test_blend_can_cut_the_second_leg_farther_from_the_stop_than_the_first():
+    first, v1, second, v2, tcp = legs()
+    near = blend_legs(first, v1, second, v2, DT, tcp(first), tcp(second), radius_m=0.02)
+    far = blend_legs(first, v1, second, v2, DT, tcp(first), tcp(second), radius_m=0.02, second_radius_m=0.06)
+    assert near is not None and far is not None
+    assert far[2] + 5 >= near[2]  # replacing more of the second leg changes the time saved by only a few samples
+    np.testing.assert_allclose(far[0][-5:], second[-5:])
+

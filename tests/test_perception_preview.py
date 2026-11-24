@@ -199,6 +199,8 @@ def test_cad_projection_contains_three_fingers_and_respects_the_model_tcp(tmp_pa
         vertices = original[name]
         expected = vertices[vertices[:, 2] >= vertices[:, 2].max() - .015].mean(axis=0)
         np.testing.assert_allclose(tip, 100*expected[:2]/(expected[2] + 1), rtol=1e-6)
+        world_tip = next(part['tip_world'] for part in result[0]['outlines'] if part['part'] == name)
+        np.testing.assert_allclose(world_tip, expected + [0, 0, 1], atol=1e-12)
 
 
 def snapshot(root, identity="first"):

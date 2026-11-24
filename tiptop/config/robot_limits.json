@@ -5,7 +5,7 @@
     8.0,
     8.0,
     8.0,
-    10.0
+    12.0
   ],
   "max_jerk": [
     256.0,
@@ -13,7 +13,7 @@
     256.0,
     256.0,
     256.0,
-    320.0
+    384.0
   ],
-  "terminal_velocity_tolerance_rad_s": 0.021
+  "terminal_velocity_tolerance_rad_s": 0.025
 }

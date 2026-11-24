@@ -70,7 +70,8 @@ def gripper_mesh_parts(urdf_path):
 
 def project_grasps(world_from_tcp, world_from_cam, intrinsics, spheres, ids, scores, *, limit=32, tool_parts=()):
     """Project TCP axes, the open fingers' tip points, and open-tool collision spheres."""
-    poses = np.linalg.inv(np.asarray(world_from_cam)) @ np.asarray(world_from_tcp)
+    world_poses = np.asarray(world_from_tcp)
+    poses = np.linalg.inv(np.asarray(world_from_cam)) @ world_poses
     k, spheres = np.asarray(intrinsics), np.asarray(spheres)
     # +Z is the DB approach axis; the gripper body lies on its negative side.
     axes = np.array([[0, 0, 0], [.035, 0, 0], [0, .035, 0], [0, 0, .07]])
@@ -93,12 +94,14 @@ def project_grasps(world_from_tcp, world_from_cam, intrinsics, spheres, ids, sco
         for name, vertices in tool_parts:
             if "finger" not in name:
                 continue
-            tip = finger_tip(vertices) @ pose[:3, :3].T + pose[:3, 3]
+            tip_tcp = finger_tip(vertices)
+            tip = tip_tcp @ pose[:3, :3].T + pose[:3, 3]
             if tip[2] > .001:
                 pixel = k @ tip
-                outlines.append(dict(part=name, tip=(pixel[:2] / pixel[2]).tolist()))
+                tip_world = tip_tcp @ world_poses[i][:3, :3].T + world_poses[i][:3, 3]
+                outlines.append(dict(part=name, tip=(pixel[:2] / pixel[2]).tolist(), tip_world=tip_world.tolist()))
         output.append(dict(id=int(ids[i]), score=float(scores[i]), axes=pixels.tolist(), spheres=circles,
-                           outlines=outlines, world_from_tcp=np.asarray(world_from_tcp)[i].tolist()))
+                           outlines=outlines, world_from_tcp=world_poses[i].tolist()))
     return output
 
 

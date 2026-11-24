@@ -12,6 +12,7 @@ from tiptop.doosan.leg_blend import blend_legs
 
 CUTAMP_APPROACH_M = 0.05  # cuTAMP ends the carry this far before the placement pose, then descends straight
 TRANSPORT_APPROACH_M = 0.02  # this adapter ends the carry this far before it, drops the descent and releases there
+CARRY_SECOND_CUT_M = 0.06  # the transport is cut this far from the lift end: nearer it still creeps away, and dips
 RELEASE_LOW_TOLERANCE_M = 0.015  # the object may be released this much lower than that point; any higher is accepted
 
 
@@ -133,7 +134,7 @@ def stay_at(start):
                            get_interpolated_plan=lambda: path)
 
 
-def joined_path(motion_gen, first, second):
+def joined_path(motion_gen, first, second, *, second_radius_m=None):
     """The two consecutive legs' paths joined without a stop in between, or None if that is not possible."""
     from curobo.types.state import JointState
 
@@ -147,7 +148,7 @@ def joined_path(motion_gen, first, second):
 
     joined = blend_legs(first_path.position.cpu().numpy(), first_path.velocity.cpu().numpy(),
                         second_path.position.cpu().numpy(), second_path.velocity.cpu().numpy(), dt,
-                        tcp_positions(first_path), tcp_positions(second_path))
+                        tcp_positions(first_path), tcp_positions(second_path), second_radius_m=second_radius_m)
     if joined is None:
         return None
     position, velocity, _ = joined
@@ -365,7 +366,7 @@ def run_standard_place(solver, settings, region, world_from_cad, cad_vertices, *
                     if self.carry_legs == 0:
                         self.lift_result = value
                     else:
-                        path = joined_path(motion_gen, self.lift_result, value)
+                        path = joined_path(motion_gen, self.lift_result, value, second_radius_m=CARRY_SECOND_CUT_M)
                         if path is not None:
                             # The lift now lives inside the transport's path, which starts at the grasp pose.
                             lift = self.lift_result.get_interpolated_plan()
