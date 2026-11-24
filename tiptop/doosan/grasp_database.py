@@ -5,12 +5,15 @@ All transforms use column vectors and metres. No Panda/M2T2 TCP offset applies.
 """
 
 import json
+import math
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
 from tiptop.perception.cameras.geometry import _rigid_transform
+
+FINGER_SYMMETRY_RAD = 2 * math.pi / 3  # Fingers repeat every 120 degrees about the TCP z axis
 
 
 def _file_key(path):

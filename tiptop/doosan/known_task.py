@@ -16,6 +16,7 @@ from unittest.mock import patch
 import numpy as np
 
 from tiptop.console import log_tag
+from tiptop.doosan.grasp_database import FINGER_SYMMETRY_RAD
 from tiptop.doosan.planning_runtime import serialized_planning
 
 IK_CANDIDATE_FACTOR = 1.5  # CAD-clear candidates IK-solved per particle; IK failures are dropped
@@ -51,9 +52,6 @@ def log_candidate_stage(tag, label, before, after, seconds=None, note="", *, eno
     kind = "fail" if after == 0 else "warn" if after < enough else "ok"
     timing = "" if seconds is None else f" · {seconds:.2f}s"
     log_tag(tag, f"{label}  {before:,} → {after:,} (−{before - after:,}){note}{timing}", kind)
-
-
-FINGER_SYMMETRY_RAD = 2 * math.pi / 3  # Fingers repeat every 120 degrees about the TCP z axis
 
 
 def z_rotations(angles):

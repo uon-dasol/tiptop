@@ -547,3 +547,81 @@ def test_visual_frontend_publishes_depth_and_detection_independently(monkeypatch
         None, frame, np.eye(4), "unused", perception_mode="sam3_reference", on_update=update))
     assert events == ["detection", "depth"]
     assert result["objects"]["bottle"]["valid_pixels"] == 6
+
+
+@pytest.mark.parametrize('steps', [1, -1])
+def test_final_boxes_follow_a_grasp_turned_by_the_finger_symmetry(tmp_path, steps):
+    from yourdfpy import URDF
+    from tiptop.doosan.grasp_database import FINGER_SYMMETRY_RAD
+    from tiptop.perception_preview import z_rotation
+
+    preview = snapshot(tmp_path)
+    tcp = URDF.load(str(preview.urdf_path), load_meshes=False).get_transform('gripper_tcp', 'base_link')
+    # The planner executes the DB row turned about its z axis; the plan records that turned pose as its target.
+    turned = tcp.copy()
+    turned[:3, :3] = tcp[:3, :3] @ z_rotation(steps*FINGER_SYMMETRY_RAD)[:3, :3]
+    local = np.array([[[0, 0, 0], [.01, 0, 0], [.01, .02, 0], [0, .02, 0]]]*3)
+    preview._database_context = ([dict(grasp_mat=tcp.tolist(), grasp_boxes=(local @ tcp[:3, :3].T + tcp[:3, 3]).tolist(),
+                                       scene_id='0', source_pregrasp_index=0)], np.eye(4))
+    camera, k = np.eye(4), np.diag([100, 100, 1])
+    preview.grasps(dict(world_from_tcp=[tcp], candidate_indices=[0], scores=[.2]), camera, k, max_tilt_deg=180)
+    preview.update('planning', dict(supplied_candidate_ids=[0]))
+    plan = dict(selected_grasp=dict(world_from_tcp=turned.tolist(), source='completed_motion_plan'))
+    final = dict(world_from_tcp=turned.tolist())
+    preview._attach_final_db_boxes(final, plan, camera, k)
+    assert 'db_match_note' not in final
+    assert final['db_reference']['index'] == 0
+    assert final['db_reference']['match_method'] == 'planned_target'
+    assert final['db_reference']['symmetry_turn_deg'] == pytest.approx(np.degrees(steps*FINGER_SYMMETRY_RAD))
+    # The boxes stay on the physical fingers: they turn with the TCP about its own z axis.
+    around_tcp = tcp[:3, :3] @ z_rotation(steps*FINGER_SYMMETRY_RAD)[:3, :3] @ tcp[:3, :3].T
+    expected = (local @ tcp[:3, :3].T + tcp[:3, 3] - tcp[:3, 3]) @ around_tcp.T + tcp[:3, 3]
+    np.testing.assert_allclose(final['grasp_boxes'][0]['world_points'], expected[0], atol=1e-6)
+
+
+def test_turned_grasp_prefers_the_row_that_matches_without_turning(tmp_path):
+    from yourdfpy import URDF
+    from tiptop.doosan.grasp_database import FINGER_SYMMETRY_RAD
+    from tiptop.perception_preview import z_rotation
+
+    preview = snapshot(tmp_path)
+    tcp = URDF.load(str(preview.urdf_path), load_meshes=False).get_transform('gripper_tcp', 'base_link')
+    sibling = tcp.copy()  # The DB holds the same grasp turned by one finger step as its own row.
+    sibling[:3, :3] = tcp[:3, :3] @ z_rotation(FINGER_SYMMETRY_RAD)[:3, :3]
+    local = np.array([[[0, 0, 0], [.01, 0, 0], [.01, .02, 0], [0, .02, 0]]]*3)
+    rows = [dict(grasp_mat=pose.tolist(), grasp_boxes=(local @ pose[:3, :3].T + pose[:3, 3]).tolist(),
+                 scene_id=str(i), source_pregrasp_index=i) for i, pose in enumerate((tcp, sibling))]
+    preview._database_context = (rows, np.eye(4))
+    camera, k = np.eye(4), np.diag([100, 100, 1])
+    preview.grasps(dict(world_from_tcp=[tcp, sibling], candidate_indices=[0, 1], scores=[.2, .2]), camera, k, max_tilt_deg=180)
+    preview.update('planning', dict(supplied_candidate_ids=[0, 1]))
+    plan = completed_plan()
+    plan['selected_grasp'] = dict(world_from_tcp=tcp.tolist(), source='completed_motion_plan')
+    preview.publish_plan(plan, camera, k)
+    final = preview.state['final_grasp']
+    assert final['db_reference']['index'] == 0
+    assert final['db_reference']['symmetry_turn_deg'] == pytest.approx(0)
+
+
+def test_gemini_detection_publishes_every_object_the_goal_names_and_is_final_at_once(tmp_path):
+    preview = snapshot(tmp_path)
+    boxes = [dict(label=name, box_2d=[0, i*200, 500, i*200+150]) for i, name in enumerate(["can", "bin", "mug"])]
+    preview.update("detection", dict(bboxes=boxes, masks=np.zeros((3, 1, 6, 8), bool), semantic_source="gemini_sam2",
+                                     grounded_atoms=[dict(predicate="on", args=["can", "bin"]),
+                                                     dict(predicate="holding", args=["can"])]))
+    state = json.loads((preview.directory / "state.json").read_text())
+    assert state["target_label"] == "can"
+    assert state["target_labels"] == ["can", "bin"]  # the mug is neither goal object nor destination
+    assert state["target_final"] is True
+    assert [box["label"] for box in state["boxes"]] == ["can", "bin", "mug"]
+
+
+def test_obstacle_scene_carries_the_korean_display_name_of_objects_without_a_catalog_class():
+    from tiptop.perception_preview import build_obstacle_scene
+
+    boxes = [dict(label="chair_leg_cap", class_id="chair_leg_caps", name_ko="의자다리커버", box_2d=[0, 0, 10, 10]),
+             dict(label="dipper_inside", class_id=None, name_ko="바가지 안쪽", box_2d=[0, 20, 10, 30]),
+             dict(label="mug", box_2d=[0, 40, 10, 50])]
+    scene = build_obstacle_scene({}, {}, boxes, 0.0, "chair_leg_cap")
+    assert [(o["class_id"], o["name_ko"]) for o in scene["objects"]] == [
+        ("chair_leg_caps", "의자다리커버"), (None, "바가지 안쪽"), ("mug", None)]

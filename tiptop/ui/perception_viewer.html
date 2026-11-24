@@ -32,8 +32,7 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
 .launcher .mode-options-title{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.launcher .mode-fields{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px}.launcher .mode-fields label.field{min-width:0}@media(max-width:900px){.launcher .mode-fields{grid-template-columns:1fr}}
 .launcher textarea{flex:1;min-width:320px;background:#0c1112;color:var(--cyan);border:1px solid var(--line);border-radius:6px;padding:8px;font:12px ui-monospace,monospace;resize:vertical}
 .launcher pre{margin:0;max-height:240px;overflow:auto;background:#0c1112;border:1px solid var(--line);border-radius:6px;padding:10px;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}
-.launcher .chip{border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px;color:var(--muted)}.launcher .chip.up{color:var(--accent-ink);border-color:var(--accent-dim)}.launcher .chip.down{color:#f7ad8c;border-color:#7a4d3c}.launcher .chip.off{opacity:.4}
-.launcher .run{background:#b3261e;border-color:#e5534b;color:#fff;font-weight:600}.launcher .run:hover:not(:disabled){background:#cf3a30;border-color:#ff8f80;color:#fff}.launcher .danger{border-color:#f7ad8c;color:#f7ad8c}.launcher .lsep{grid-column:1/-1;color:var(--muted);font-size:11px;letter-spacing:1px;border-top:1px solid var(--line);padding-top:8px}.tools{gap:14px;padding:14px 20px}.tools .group{gap:12px}.tools .check{font-size:13px}.tools .grasp-info{margin-left:auto;display:grid;gap:2px;text-align:right}.tools .grasp-info span{color:var(--muted);font-size:10px;letter-spacing:.7px}.tools .grasp-info strong{font:12px ui-monospace,monospace;color:var(--ink)}
+.launcher .chip{border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px;color:var(--muted)}.launcher .chip.up{color:var(--accent-ink);border-color:var(--accent-dim)}.launcher #svc{flex-direction:column;align-items:flex-start;gap:8px}.launcher .task-row{grid-column:1/-1;display:flex;gap:14px;align-items:end}.launcher .task-row .preset-field{flex:0 0 230px}.launcher .task-row .preset-field+label.field{flex:1}.launcher .chip.starting,.launcher .chip.stopping{color:#e8c46a;border-color:#7a6a2c}.launcher .chip.failed{color:#f08a7a;border-color:#7a3c3c}.launcher .chip button{margin-left:6px;padding:0 6px;font-size:11px;line-height:16px}.launcher .run{background:#b3261e;border-color:#e5534b;color:#fff;font-weight:600}.launcher .run:hover:not(:disabled){background:#cf3a30;border-color:#ff8f80;color:#fff}.launcher .danger{border-color:#f7ad8c;color:#f7ad8c}.launcher .lsep{grid-column:1/-1;color:var(--muted);font-size:11px;letter-spacing:1px;border-top:1px solid var(--line);padding-top:8px}.tools{gap:14px;padding:14px 20px}.tools .group{gap:12px}.tools .check{font-size:13px}.tools .grasp-info{margin-left:auto;display:grid;gap:2px;text-align:right}.tools .grasp-info span{color:var(--muted);font-size:10px;letter-spacing:.7px}.tools .grasp-info strong{font:12px ui-monospace,monospace;color:var(--ink)}
 .launcher .ltop{grid-column:1/-1;display:grid;grid-template-columns:calc((100% + 14px)/3 - 7px) minmax(0,1fr);align-items:center}@media(max-width:900px){.launcher .ltop{display:flex;flex-wrap:wrap;gap:12px}}
 .launcher .lcol{display:flex;flex-direction:column;gap:8px}
 .launcher .push-right{margin-left:auto}dialog.limits{width:min(640px,94vw)}.limits-body{padding:18px 20px;display:grid;gap:14px}.limits-body .lrow{display:flex;gap:12px;align-items:center;justify-content:space-between}.limits-note{color:var(--muted);font-size:12px}.limits-body .msg{font-size:12px;color:#f7ad8c;min-height:16px}
@@ -43,7 +42,7 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
 .views{grid-template-columns:repeat(4,minmax(0,1fr))}.obstacle-controls{display:flex;gap:8px;align-items:center;font-size:11px}.obstacle-controls label{display:flex;gap:3px;align-items:center;white-space:nowrap}.obstacle-controls input{accent-color:var(--accent)}.obstacle-controls button{padding:4px 7px;font-size:11px}
 #obstaclePanel:fullscreen{display:flex;flex-direction:column;background:var(--bg);padding:20px}#obstaclePanel:fullscreen .viewport{flex:1;aspect-ratio:auto;min-height:0}#obstaclePanel:fullscreen .panel-title,#obstaclePanel:fullscreen .footer{flex-shrink:0}
 @media(max-width:1280px){.views{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:900px){.views{grid-template-columns:1fr}}
-.tasklog{width:100%;margin-bottom:10px}.lfields .tasklog{grid-column:1/-1;margin:2px 0 0}.tasklog #taskLogLines{max-height:7.8em;overflow:auto;margin-top:5px;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:#0f1514;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}.tasklog #taskLogLines div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tasklog .taskrow{display:grid;grid-template-columns:6.3em 9.5em 5.8em 5.8em 6.8em 4.6em 5em 16em 1fr 7.5em 10em;gap:0 10px;align-items:center;min-width:max-content}.tasklog select.taskmark{width:100%;font:11px system-ui,sans-serif;background:#111718;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 3px}.tasklog select.taskmark.ok{color:#66db95}.tasklog select.taskmark.fail{color:#ff7676}.tasklog .grasp-ok{color:#66db95}.tasklog .tasktail{display:flex;gap:10px}.tasklog .tasktail span:first-child{min-width:5em}.tasklog .demo-tag{color:#ffbe5c}.tasklog .grasp-fail{color:#ff7676}
+.tasklog{width:100%;margin-bottom:10px}.lfields .tasklog{grid-column:1/-1;margin:2px 0 0}.tasklog #taskLogLines{max-height:7.8em;overflow:auto;margin-top:5px;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:#0f1514;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}.tasklog #taskLogLines div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tasklog #taskLogLines{display:grid;grid-template-columns:4.6em 6.3em 9.5em 5.8em 5.8em 6.8em 4.6em 5em minmax(5em,max-content) max-content 1fr 7.5em 10em;column-gap:10px;align-content:start}.tasklog .taskrow{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center}.tasklog select.taskmark{width:100%;font:11px system-ui,sans-serif;background:#111718;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 3px}.tasklog select.taskmark.ok{color:#66db95}.tasklog select.taskmark.fail{color:#ff7676}.tasklog .grasp-ok{color:#66db95}.tasklog .demo-tag{color:#ffbe5c}.tasklog .mode-gemini{color:#7aa7f0}.tasklog .mode-sam3{color:#d99be8}.tasklog .grasp-fail{color:#ff7676}
 </style>
 </head>
 <body>
@@ -59,7 +58,8 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
   <div class="ltop">
    <div class="lrow">
    <div class="seg" id="modeSeg"><button data-mode="gemini_er">Gemini</button><button data-mode="sam3_reference">SAM3</button></div>
-   <button class="run" id="runBtn">실행</button><button class="danger" id="stopBtn" disabled>중단 (Ctrl+C)</button></div>
+   <button class="run" id="runBtn">실행</button><button class="danger" id="stopBtn" disabled>중단 (Ctrl+C)</button>
+   </div>
    <span class="lrow"><span class="lrow" id="svc"></span><button id="limitsBtn" class="push-right">로봇 파라미터</button></span></div>
   <aside class="lobjects hidden" id="objects"><div class="lobjects-title">물체 <span id="objCount"></span> · 클릭하면 지시문에 반영</div><div id="objList"></div></aside>
   <div class="lmain">
@@ -292,29 +292,47 @@ function drawObstacles(){
  drawObstacleGrasps(ctx,project,canvas.width/Math.max(1,canvas.clientWidth));
  const selected=prepared.find(o=>o.label===target);
  ctx.restore();
- if(selected){const points=(selected.vertices.length?selected.vertices:selected.points).map(project).filter(Boolean);drawOutsideObjectLabel(ctx,koreanName(selected.class_id),points,canvas.width/Math.max(1,canvas.clientWidth),{x:0,y:0,w:canvas.width,h:canvas.height})}
+ if(selected){const points=(selected.vertices.length?selected.vertices:selected.points).map(project).filter(Boolean);drawOutsideObjectLabel(ctx,displayName(selected),points,canvas.width/Math.max(1,canvas.clientWidth),{x:0,y:0,w:canvas.width,h:canvas.height})}
  const axisOrigin=[75,600],axisLength=Math.min(.1,span*.3),origin=rotate(center);
  ['X','Y','Z'].forEach((name,i)=>{const p=[...center];p[i]+=axisLength;const q=rotate(p),end=[axisOrigin[0]+(q[0]-origin[0])*450,axisOrigin[1]-(q[1]-origin[1])*450],color=['#ff7676','#66db95','#7bafff'][i];pathLine(ctx,axisOrigin,end,color,2);ctx.font='17px system-ui';ctx.fillStyle=color;ctx.fillText(name,end[0]+4,end[1]-4)});
  ctx.font='16px system-ui';ctx.fillStyle='#9aa9a3';ctx.fillText(obstacleCamera.mode==='rgb'?'RGB 카메라 시점 · 그리드 100 mm':'자유 회전 · 그리드 100 mm',22,30);
  const others=objects.filter(o=>o.collision_mesh&&o.label!==target&&o.source!=='configured').length;
  $('obstacleFooter').textContent=`관측 장애물 ${others}개`;
 }
-function koreanName(name){return window.objectNames?.[name]??name}
+function displayName(item){return (item.class_id&&window.objectNames?.[item.class_id])||item.name_ko||window.objectNames?.[item.label]||item.label}
+// Labels of the objects the task is about; null while none is known. SAM3 verifies one candidate, Gemini names every goal object.
+function targetLabels(){
+ if(state.detector==='sam3_reference')return state.target_label==null?null:[state.target_label];
+ return state.target_labels?.length?state.target_labels:null;
+}
+function isTarget(box){return targetLabels()?.includes(box.label)??false}
+// Other Gemini detections of a goal object's catalog class: the instances it had to choose between.
+function isCandidate(box){
+ if(state.detector==='sam3_reference'||isTarget(box)||!box.class_id)return false;
+ return state.boxes.some(other=>isTarget(other)&&other.class_id===box.class_id);
+}
+function isShown(box){return isTarget(box)||isCandidate(box)}
+function instanceName(box){
+ const name=(box.class_id?box.label.replace(box.class_id,''):box.label).replace(/_+/g,'_').replace(/^_|_$/g,'');
+ return name||box.label;
+}
 function detectionLabel(box){
- if(state.detector==='sam3_reference'&&box.label!==state.target_label&&!(state.target_label==null&&state.boxes.length===1))return '';
- return koreanName(box.class_id??box.label);
+ if(!isShown(box)&&!(targetLabels()===null&&state.boxes.length===1))return '';
+ const name=displayName(box);
+ return box.class_id&&state.boxes.filter(other=>isShown(other)&&other.class_id===box.class_id).length>1?`${name} · ${instanceName(box)}`:name;
 }
 let maskCache={key:'',canvas:null};
 function visibleMask(){
- const index=state.boxes.findIndex(box=>box.label===state.target_label);
- if(state.detector==='sam3_reference'&&state.target_final===false)return null;
- if(!images.mask||!images.mask_ids||state.detector!=='sam3_reference'||index<0)return images.mask;
- const key=`${state.images.mask}:${index}`;
+ const shown=[],dim=[];
+ state.boxes.forEach((box,i)=>{if(isTarget(box))shown.push(i+1);else if(isCandidate(box))dim.push(i+1)});
+ if(state.target_final===false)return null;
+ if(!images.mask||!images.mask_ids||!shown.length&&!dim.length)return images.mask;
+ const key=`${state.images.mask}:${shown}:${dim}`;
  if(maskCache.key!==key){
   const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');canvas.width=images.mask.width;canvas.height=images.mask.height;
   ctx.drawImage(images.mask,0,0);const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
   ctx.drawImage(images.mask_ids,0,0);const ids=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-  for(let i=0;i<ids.length;i+=4)if(ids[i]!==index+1)pixels.data[i+3]=0;
+  for(let i=0;i<ids.length;i+=4){if(dim.includes(ids[i]))pixels.data[i+3]=Math.round(pixels.data[i+3]*.4);else if(!shown.includes(ids[i]))pixels.data[i+3]=0}
   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.putImageData(pixels,0,0);maskCache={key,canvas};
  }
  return maskCache.canvas;
@@ -335,7 +353,7 @@ function draw(){
   if(placement.region.source==='fixed_box')for(let i=0;i<4;i++)pathLine(ctx,placement.bottom[i],placement.top[i],'#78d4e0',unit);
   if(placement.region.source!=='fixed_box')drawOutsideObjectLabel(ctx,`목적지 · 상단 +${Math.round(placement.region.release_height_m*100)}cm`,placement.bottom,unit,view);
  }
- if($('boxToggle').checked)for(const box of state.boxes){if(state.detector==='sam3_reference'&&(state.target_final===false||(state.target_label!=null&&box.label!==state.target_label)))continue;const [y1,x1,y2,x2]=box.box_2d.map(v=>v/1000);const x=x1*canvas.width,y=y1*canvas.height;ctx.strokeStyle='#b6ed90';ctx.lineWidth=1.2*unit;ctx.strokeRect(x,y,(x2-x1)*canvas.width,(y2-y1)*canvas.height);const label=detectionLabel(box);if(!label)continue;drawOutsideObjectLabel(ctx,label,[[x,y],[x2*canvas.width,y2*canvas.height]],unit,view)}
+ if($('boxToggle').checked)for(const box of state.boxes){if(state.target_final===false||(targetLabels()!==null&&!isShown(box)))continue;const [y1,x1,y2,x2]=box.box_2d.map(v=>v/1000);const x=x1*canvas.width,y=y1*canvas.height;const candidate=isCandidate(box);ctx.strokeStyle=candidate?'#8a9b82':'#b6ed90';ctx.lineWidth=1.2*unit;ctx.setLineDash(candidate?[5*unit,4*unit]:[]);ctx.strokeRect(x,y,(x2-x1)*canvas.width,(y2-y1)*canvas.height);ctx.setLineDash([]);const label=detectionLabel(box);if(!label)continue;drawOutsideObjectLabel(ctx,label,[[x,y],[x2*canvas.width,y2*canvas.height]],unit,view)}
  if($('graspToggle').checked){if(graspMode==='candidates'){const visible=state.grasps.filter(g=>g.id!==selectedId).slice(0,Number($('count').value)-1);for(const g of visible)drawGrasp(ctx,g,false)}const selected=activeGrasp();if(selected)drawGrasp(ctx,selected,true)}
  const depth=$('depth');depth.width=state.width;depth.height=state.height;if(images.depth)depth.getContext('2d').drawImage(images.depth,view.x,view.y,view.w,view.h,0,0,depth.width,depth.height);
  const index=state.grasps.findIndex(g=>g.id===selectedId);$('candidateIndex').textContent=index<0?'—':`${index+1} / ${state.grasps.length}`;$('previous').disabled=index<=0;$('next').disabled=index<0||index>=state.grasps.length-1;
@@ -403,15 +421,34 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
   const response=await fetch(path,{...options,cache:'no-store',headers:{'X-Launcher-Token':LAUNCHER_TOKEN,'Content-Type':'application/json'}});
   const data=await response.json();if(!response.ok)throw Error(data.error||String(response.status));return data;
  }
+ function taskRow(taskLabel){
+  if(mode!=='gemini_er')return taskLabel;
+  const presetLabel=document.createElement('label'),select=document.createElement('select');
+  presetLabel.className='field preset-field';
+  for(const [key,preset] of Object.entries(cfg.task_presets)){
+   if(preset.perception_modes&&!preset.perception_modes.includes(mode))continue;select.add(new Option(preset.label,key))}
+  select.value=values[mode].task_preset;select.title=`지시문 예: <물체> ${cfg.task_presets[select.value]?.action??''}`;
+  select.addEventListener('change',()=>setPreset(select.value));
+  presetLabel.append('모드',select);taskLabel.className='field';
+  const row=document.createElement('div');row.className='task-row';row.append(presetLabel,taskLabel);return row;
+ }
+ function setPreset(key){
+  const preset=cfg.task_presets[key],[id]=splitTask(values[mode].task||''),object=objects.find(o=>o.class_id===id);
+  values[mode].task_preset=key;values[mode].release_height_m=preset.release_height_m;
+  if(object)values[mode].task=object.name_ko+' '+preset.action;
+  render();markObject();schedulePreview();
+ }
+ // Planning limits and SAM3 options stay in `values` and in the command; the demo view only hides their inputs.
+ const DEMO_HIDDEN=new Set(['max_approach_tilt_deg','cad_mask_min_iou','min_table_clearance_m','max_wrist_travel_deg','footprint_overhang_tolerance_mm','min_engagement_depth_m','num_particles','table_support','reference_scene','sam3_confidence_threshold','appearance_ranking','appearance_weight']);
  function render(){
   const box=$('lfields'),taskLogBox=$('taskLog');box.replaceChildren();let stack=null,modeFields=null,modeTitle=null;
   for(const field of [...cfg.fields].sort((a,b)=>!!a.modes-!!b.modes)){
-   if(field.hidden||field.modes&&!field.modes.includes(mode)||field.tasks&&!field.tasks.includes(values[mode].task_preset)&&!(field.key.startsWith('box_')&&values[mode].fixed_box_present))continue;
+   if(field.hidden||DEMO_HIDDEN.has(field.key)&&values[mode].minimal_records||field.modes&&!field.modes.includes(mode)||field.tasks&&!field.tasks.includes(values[mode].task_preset)&&!(field.key.startsWith('box_')&&values[mode].fixed_box_present))continue;
    if(field.modes&&!modeFields){modeTitle=document.createElement('div');modeTitle.className='lsep mode-options-title';modeTitle.textContent=(mode==='sam3_reference'?'SAM3':'Gemini')+' 전용 설정';modeFields=document.createElement('div');modeFields.className='mode-fields';box.append(modeTitle,modeFields)}
    const label=document.createElement('label');let input;
    if(field.type==='checkbox'){
     label.className='check-field';input=document.createElement('input');input.type='checkbox';input.checked=!!values[mode][field.key];
-    input.addEventListener('change',()=>{values[mode][field.key]=input.checked;if(field.key==='minimal_records'){setDemoView(input.checked);buildObjects()}schedulePreview()});label.append(input,field.label);
+    input.addEventListener('change',()=>{values[mode][field.key]=input.checked;if(field.key==='minimal_records')render();schedulePreview()});label.append(input,field.label);
    }else{
     label.className='field'+(field.key==='task'?' wide':'');
     if(field.type==='select'){input=document.createElement('select');for(const option of field.options){const entry=new Option(field.option_labels?.[option]??option,option);if(field.key==='task_preset'){const modes=cfg.task_presets[option].perception_modes;entry.disabled=!!modes&&!modes.includes(mode)}input.add(entry)}}
@@ -421,7 +458,7 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
    }
    if(field.key==='appearance_ranking')modeTitle.append(label);
    else if(field.key==='surrounding_obstacles'||field.key==='minimal_records'){if(!stack){stack=document.createElement('div');stack.className='check-stack';box.append(stack)}stack.append(label)}
-   else (field.modes?modeFields:box).append(label);
+   else (field.modes?modeFields:box).append(field.key==='task'?taskRow(label):label);
    if(field.key==='minimal_records')box.append(taskLogBox);
   }
   setDemoView(!!values[mode].minimal_records);
@@ -496,14 +533,15 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
    box.replaceChildren();
    for(const row of rows){
     const item=document.createElement('div');item.className='taskrow';item.title=row.line;
-    const tail=document.createElement('span');tail.className='tasktail';
-    row.cells.forEach((cell,index)=>{
+    row.cells.forEach(cell=>{
      const column=document.createElement('span');column.textContent=cell;
      if(cell==='파지 성공'||cell==='작업 완료')column.className='grasp-ok';
      else if(cell==='파지 실패'||cell.startsWith('작업 중단('))column.className='grasp-fail';
      else if(cell==='데모 모드')column.className='demo-tag';
-     (index<7?item:tail).append(column)});
-    item.append(tail,document.createElement('span'));
+     else if(cell==='Gemini')column.className='mode-gemini';
+     else if(cell==='SAM3')column.className='mode-sam3';
+     item.append(column)});
+    item.append(document.createElement('span'));
     for(const field of ['perception','result']){
      const [placeholder,options]=markChoices[field],current=row[field],select=document.createElement('select');
      select.className='taskmark'+(markClass[current]??(current?' fail':''));select.title=field==='perception'?'물체를 제대로 알아봤는가':'이 작업의 실제 결과';
@@ -516,11 +554,23 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
     box.append(item)}
   }catch(error){}
  }
+ function serviceChip(service){
+  const chip=document.createElement('span');chip.className='chip '+service.state;
+  chip.textContent={off:'○ ',up:'● ',starting:'◐ ',stopping:'◐ ',failed:'✕ '}[service.state]+service.name;
+  if(service.controllable&&(service.managed||service.state!=='up')){
+   const button=document.createElement('button');button.type='button';button.disabled=service.state==='stopping';
+   button.textContent=service.managed?'■':'▶';button.title=service.managed?'종료 (Ctrl+C와 동일)':'시작';
+   button.onclick=()=>controlService(service);chip.append(button)}
+  return chip}
+ async function controlService(service){
+  if(service.managed&&!confirm(`${service.name}를 종료할까요?`))return;
+  try{await api('/api/service/'+(service.managed?'stop':'start'),{id:service.id})}catch(error){$('runMsg').textContent=error.message}
+  refreshStatus()}
  async function refreshStatus(){
   try{
    const data=await api('/api/status');
-   $('svc').replaceChildren(...data.services.map(service=>{const chip=document.createElement('span');const needed=service.modes.includes(mode);
-    chip.className='chip '+(service.up?'up':'down')+(needed?'':' off');chip.textContent=(service.up?'● ':'○ ')+service.name;return chip}));
+   const shown=data.services.filter(service=>service.modes.includes(mode));
+   $('svc').replaceChildren(...[1,2].map(row=>{const line=document.createElement('div');line.className='lrow';line.append(...shown.filter(service=>service.row===row).map(serviceChip));return line}));
    if(data.running&&!running){logNext=0;$('runLog').textContent='';pollLog()}else setRunning(data.running);
    $('runMsg').textContent=mode==='gemini_er'&&!data.google_api_key?'GOOGLE_API_KEY가 이 뷰어 서버의 환경에 없습니다. 키가 있는 터미널에서 뷰어를 다시 실행하세요.':'';
   }catch(error){$('runMsg').textContent=error.message}

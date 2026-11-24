@@ -18,6 +18,7 @@ SUCCESS = "성공"
 FAILURE_REASONS = ("파지 실패", "이송 중 놓침", "충돌")
 MARK_CHOICES = dict(perception=("정상 인식", "오인식"), result=(SUCCESS, *FAILURE_REASONS))
 _MARKS_LOCK = threading.Lock()
+MODE_NAMES = dict(gemini_er="Gemini", sam3_reference="SAM3")
 EMPTY_CLOSE_MAX_COUNTS = 315  # fingers closed without an object end at or below this, whatever the closing current
 
 
@@ -65,6 +66,7 @@ def task_log_entry(output, result, wall_seconds, demo=False):
         executed=result.get("executed"),
         demo=bool(demo),
         failed_stage=result.get("failed_stage"),
+        perception_mode=result.get("perception_mode"),
     )
 
 
@@ -81,6 +83,14 @@ def append_task_log(output, result, wall_seconds, path=None, demo=False):
         logging.getLogger(__name__).warning("Could not write the task log: %s", error)
 
 
+def perception_mode(entry):
+    """The recognition mode of a logged task; older lines lack it, so it is read from the task's own result file."""
+    mode = entry.get("perception_mode")
+    if mode is None and entry.get("output"):
+        mode = (_read_json(ROOT / entry["output"] / "task-result.json") or {}).get("perception_mode")
+    return mode
+
+
 def log_cells(entry):
     """The log line's columns; one that does not apply is empty so the page can keep every row's columns aligned."""
     effort, position, current = (
@@ -93,6 +103,7 @@ def log_cells(entry):
     else:
         outcome = "작업 완료" if entry.get("executed") else ""
     return [
+        MODE_NAMES.get(perception_mode(entry), ""),
         f"TASK {entry['task']}" if entry.get("task") is not None else "TASK",
         entry.get("name_ko") or "-",
         f"effort {effort}" if effort is not None else "effort -",
@@ -106,7 +117,7 @@ def log_cells(entry):
 
 
 def log_line(entry):
-    """`TASK 877 · 바가지 · effort 50 · 전류 -49 · 위치 1272 · 18.4초 · 파지 성공 · 작업 완료 · 데모 모드`"""
+    """`Gemini · TASK 877 · 바가지 · effort 50 · 전류 -49 · 위치 1272 · 18.4초 · 파지 성공 · 작업 완료 · 데모 모드`"""
     return " · ".join(cell for cell in log_cells(entry) if cell)
 
 

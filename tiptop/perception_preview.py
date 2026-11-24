@@ -11,6 +11,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from tiptop.doosan.grasp_database import FINGER_SYMMETRY_RAD
+
 _log = logging.getLogger(__name__)
 _COLORS = [(52, 211, 153), (96, 165, 250), (251, 191, 36), (244, 114, 182)]
 
@@ -105,6 +107,12 @@ def project_grasps(world_from_tcp, world_from_cam, intrinsics, spheres, ids, sco
     return output
 
 
+def z_rotation(angle):
+    """Homogeneous rotation about z."""
+    cos, sin = np.cos(angle), np.sin(angle)
+    return np.array([[cos, -sin, 0, 0], [sin, cos, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1.]])
+
+
 def project_grasp_boxes(boxes, world_from_db, world_from_cam, intrinsics):
     """Project the three recorded sweep rectangles, already in object-zero metres."""
     boxes = np.asarray(boxes, float)
@@ -153,7 +161,7 @@ def build_obstacle_scene(object_meshes, objects, bboxes, support_z, target_label
             rotation = Rotation.from_quat(pose[[4, 5, 6, 3]]).as_matrix()
             vertices = np.asarray(geometry.vertices) @ rotation.T + pose[:3]
             faces = np.asarray(geometry.faces, int)
-        instances.append(dict(label=label, class_id=box.get("class_id", label),
+        instances.append(dict(label=label, class_id=box.get("class_id", label), name_ko=box.get("name_ko"),
                               points=np.round(points, 5).tolist(), observed_points=count,
                               vertices=np.round(vertices, 5).tolist(), faces=faces.tolist(),
                               color=list(_COLORS[index % len(_COLORS)]), collision_mesh=mesh is not None))
@@ -212,6 +220,9 @@ class TaskPreview:
                     self.state["target_label"] = next(
                         (atom["args"][0] for atom in data.get("grounded_atoms", []) if atom.get("args")), None
                     )
+                    self.state["target_labels"] = list(dict.fromkeys(
+                        arg for atom in data.get("grounded_atoms", []) for arg in atom.get("args", [])
+                    ))
                     self.state["status"] = "물체 인식 완료 · 최종 경로 계획 대기"
                 elif event == "target":
                     self.state["target_label"] = data["label"]
@@ -410,22 +421,29 @@ class TaskPreview:
             if selected_target.shape != (4, 4) or not np.isfinite(selected_target).all():
                 final["db_match_note"] = "계획의 선택 파지 정보가 유효하지 않아 범위 박스를 표시하지 않습니다."
                 return
+        # J6 folding may turn the executed grasp by whole finger-symmetry steps about the TCP z axis.
         matches = []
         for index, pose in candidates:
             distance = float(np.linalg.norm(pose[:3, 3]-tcp[:3, 3]))
-            angle = float(np.arccos(np.clip((np.trace(pose[:3, :3].T @ tcp[:3, :3])-1)/2, -1, 1)))
-            goal_matches = selected_target is None or np.allclose(pose, selected_target, atol=1e-6, rtol=0)
-            if goal_matches and distance <= position_tolerance and angle <= rotation_tolerance:
-                matches.append((index, distance, angle))
+            for steps in (0, 1, -1):
+                turned = pose.copy()
+                turned[:3, :3] = pose[:3, :3] @ z_rotation(steps*FINGER_SYMMETRY_RAD)[:3, :3]
+                angle = float(np.arccos(np.clip((np.trace(turned[:3, :3].T @ tcp[:3, :3])-1)/2, -1, 1)))
+                goal_matches = selected_target is None or np.allclose(turned, selected_target, atol=1e-5, rtol=0)
+                if goal_matches and distance <= position_tolerance and angle <= rotation_tolerance:
+                    matches.append((index, distance, angle, steps))
+        # A row that matches without turning wins over another row that matches only after a symmetry turn.
+        matches = [match for match in matches if match[3] == 0] or matches
         if len(matches) != 1:
             final["db_match_note"] = "최종 TCP와 DB 행의 대응이 불명확하여 범위 박스를 표시하지 않습니다."
             return
-        index, distance, angle = matches[0]
+        index, distance, angle, steps = matches[0]
         self._attach_db_boxes(final, index, world_from_cam, intrinsics)
         if "db_reference" in final:
             method = "planned_target" if selected_target is not None else "final_tcp_pose"
             final["db_reference"].update(match_method=method, position_error_mm=distance*1000,
-                                         rotation_error_deg=float(np.degrees(angle)))
+                                         rotation_error_deg=float(np.degrees(angle)),
+                                         symmetry_turn_deg=float(np.degrees(steps*FINGER_SYMMETRY_RAD)))
 
     def side_scene(self, vertices_world, support_z, world_from_cam):
         """Look from the Right-table end toward the robot, with the table at zero."""

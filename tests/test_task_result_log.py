@@ -89,3 +89,24 @@ def test_a_task_run_in_demo_mode_says_so_after_its_outcome(tmp_path):
     assert log.task_log_entry(output, result, 10)["demo"] is False
     entry = log.task_log_entry(output, result, 10, demo=True)
     assert log.log_cells(entry)[-2:] == ["작업 완료", "데모 모드"] and log.log_line(entry).endswith("작업 완료 · 데모 모드")
+
+
+def test_the_recognition_mode_is_the_first_column_and_names_match_the_mode_buttons(tmp_path):
+    for mode, name in (("gemini_er", "Gemini"), ("sam3_reference", "SAM3")):
+        entry = log.task_log_entry(make_task(tmp_path, 900 + len(name)), dict(status="done", perception_mode=mode), 10)
+        assert entry["perception_mode"] == mode
+        assert log.log_cells(entry)[0] == name and log.log_cells(entry)[1].startswith("TASK ")
+        assert log.log_line(entry).startswith(f"{name} · TASK ")
+    unknown = log.task_log_entry(make_task(tmp_path, 905), dict(status="done", perception_mode="other"), 10)
+    assert log.log_cells(unknown)[0] == "" and log.log_line(unknown).startswith("TASK ")
+
+
+def test_older_lines_without_a_mode_take_it_from_the_task_result_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(log, "ROOT", tmp_path)
+    output = tmp_path / "tasks/task-910"
+    output.mkdir(parents=True)
+    (output / "task-result.json").write_text(json.dumps(dict(perception_mode="gemini_er")))
+    entry = dict(task=910, output="tasks/task-910", name_ko="바가지")  # a line written before the mode was logged
+    assert log.perception_mode(entry) == "gemini_er" and log.log_cells(entry)[0] == "Gemini"
+    assert log.log_cells(dict(task=911, output="tasks/task-911"))[0] == ""  # no result file: blank, not an error
+    assert log.log_cells(dict(task=912))[0] == ""
