@@ -71,8 +71,8 @@ def test_sam3_execute_matches_the_hand_written_command(tmp_path):
 
 
 def test_minimal_records_flag_is_sent_only_in_demo_mode_and_not_for_checks():
-    values = dict(load_presets()["presets"]["sam3_reference"])
-    assert not values["minimal_records"] and "--minimal-records" not in build_command("sam3_reference", values, "plan")
+    values = dict(load_presets()["presets"]["sam3_reference"], minimal_records=False)
+    assert "--minimal-records" not in build_command("sam3_reference", values, "plan")
     values["minimal_records"] = True
     assert "--minimal-records" in build_command("sam3_reference", values, "plan")
     assert "--minimal-records" not in build_command("sam3_reference", values, "check")
@@ -284,18 +284,18 @@ def test_task_log_endpoint_returns_the_formatted_rows_newest_first_with_the_ente
     from tiptop import task_result_log
 
     entries = [dict(task=2, name_ko="후추통", effort_counts=50, close_position_counts=700, close_current_counts=-49,
-                    grasp="성공", executed=True, duration_s=17.0),
+                    grasp="성공", executed=True, duration_s=17.0, perception_mode="sam3_reference"),
                dict(task=1, name_ko="바가지", duration_s=3.0, status="failed", failed_stage="planning")]
     monkeypatch.setattr(task_result_log, "read_task_log", lambda path=None, limit=100: entries)
     task_result_log.TASK_MARKS_PATH.write_text(json.dumps({"1": dict(result="충돌", perception="오인식")}))
     server = viewer(RunManager(ROOT, build=python_command("pass")))
     status, data = request(server, "GET", "/api/task-log", token=server.launcher_token)
     assert status == 200 and json.loads(data)["rows"] == [
-        dict(task=2, line="TASK 2 · 후추통 · effort 50 · 전류 -49 · 위치 700 · 17.0초 · 파지 성공 · 작업 완료",
-             cells=["TASK 2", "후추통", "effort 50", "전류 -49", "위치 700", "17.0초", "파지 성공", "작업 완료", ""],
+        dict(task=2, line="SAM3 · TASK 2 · 후추통 · effort 50 · 전류 -49 · 위치 700 · 17.0초 · 파지 성공 · 작업 완료",
+             cells=["SAM3", "TASK 2", "후추통", "effort 50", "전류 -49", "위치 700", "17.0초", "파지 성공", "작업 완료", ""],
              perception="", result=""),
         dict(task=1, line="TASK 1 · 바가지 · effort - · 전류 - · 위치 - · 3.0초 · 작업 중단(planning)",
-             cells=["TASK 1", "바가지", "effort -", "전류 -", "위치 -", "3.0초", "", "작업 중단(planning)", ""],
+             cells=["", "TASK 1", "바가지", "effort -", "전류 -", "위치 -", "3.0초", "", "작업 중단(planning)", ""],
              perception="오인식", result="충돌"),
     ]
 
@@ -381,3 +381,37 @@ def test_robot_world_tolerance_and_motion_timeout_are_not_launcher_fields():
     assert not keys & {"robot_world_tolerance_m", "motion_timeout_s"}
     command = build_command("gemini_er", load_presets()["presets"]["gemini_er"], "plan")
     assert "--robot-world-tolerance-m" not in command and "--motion-timeout-s" not in command
+
+def test_service_api_starts_and_stops_only_services_with_a_configured_command(tmp_path):
+    from tiptop.service_manager import ServiceManager
+
+    sleeper = f"exec {sys.executable} -c 'import time; time.sleep(60)'"
+    document = dict(FIXED_PRESETS, services=[
+        dict(id="demo", name="데모", socket=str(tmp_path / "never.sock"), modes=["gemini_er"], command=sleeper),
+        dict(id="plain", name="외부", socket=str(tmp_path / "other.sock"), modes=["gemini_er"]),
+    ])
+    presets = tmp_path / "presets.json"
+    presets.write_text(json.dumps(document))
+    services = ServiceManager(ROOT, tmp_path / "services", wrap=lambda command: ["bash", "-c", command])
+    server = make_server(tmp_path, port=0, launcher=RunManager(ROOT), services=services, presets_path=presets)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    token = server.launcher_token
+
+    def rows():
+        return {row["id"]: row for row in json.loads(request(server, "GET", "/api/status", token=token)[1])["services"]}
+
+    try:
+        assert (rows()["demo"]["state"], rows()["demo"]["controllable"]) == ("off", True)
+        assert (rows()["plain"]["state"], rows()["plain"]["controllable"]) == ("off", False)
+        assert request(server, "POST", "/api/service/start", body=dict(id="plain"), token=token)[0] == 400
+        assert request(server, "POST", "/api/service/start", body=dict(id="missing"), token=token)[0] == 400
+        assert request(server, "POST", "/api/service/start", body=dict(id="demo"), token=token)[0] == 200
+        assert request(server, "POST", "/api/service/start", body=dict(id="demo"), token=token)[0] == 409
+        assert (rows()["demo"]["state"], rows()["demo"]["managed"]) == ("starting", True)
+        assert request(server, "POST", "/api/service/start", body=dict(id="demo"))[0] == 403
+        assert json.loads(request(server, "POST", "/api/service/stop", body=dict(id="demo"), token=token)[1])["stopped"] is True
+        wait_until(lambda: rows()["demo"]["state"] == "off")
+    finally:
+        services.stop("demo")
+        server.shutdown()
+        server.server_close()

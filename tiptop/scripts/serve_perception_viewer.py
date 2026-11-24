@@ -9,7 +9,6 @@ import json
 import os
 import secrets
 import socket
-import stat
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,12 +19,18 @@ from tiptop.object_catalog import demo_order, load_catalog
 from tiptop.robot_limits import BOUNDS, DEFAULTS, load_robot_limits, save_robot_limits
 from tiptop.task_result_log import set_task_mark, task_log_rows
 from tiptop.run_manager import RunManager
+from tiptop.service_manager import CommandProbes, ServiceManager
 
 
-def service_up(service):
+def service_up(service, probes=None):
+    if "probe" in service:
+        return probes.up(service["probe"])
     try:
         if "socket" in service:
-            return stat.S_ISSOCK(os.stat(service["socket"]).st_mode)
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.settimeout(0.25)
+                probe.connect(service["socket"])
+            return True
         with socket.create_connection((service["host"], service["port"]), timeout=0.25):
             return True
     except OSError:
@@ -71,13 +76,15 @@ def snapshot_rgb_camera(data, task_output):
         return None
 
 
-def make_server(root, *, port=8091, task_output=None, launcher=None, presets_path=PRESETS_PATH, limits_path=None):
+def make_server(root, *, port=8091, task_output=None, launcher=None, services=None, presets_path=PRESETS_PATH,
+                limits_path=None):
     root = Path(root).resolve()
     fixed = Path(task_output).resolve() if task_output else None
     if fixed is not None and not fixed.is_relative_to(root):
         raise ValueError("Task output must be inside the viewer root")
     page = Path(__file__).parents[1] / "ui/perception_viewer.html"
     token = secrets.token_urlsafe(16) if launcher is not None else ""
+    probes = CommandProbes()
 
     def handle_api(method, path, query, body):
         if method == "GET" and path == "/api/presets":
@@ -97,10 +104,26 @@ def make_server(root, *, port=8091, task_output=None, launcher=None, presets_pat
                                            demo=demo.get(item["class_id"]))
                                       for item in load_catalog()["objects"]])
         if method == "GET" and path == "/api/status":
-            services = [dict(name=item["name"], modes=item["modes"], up=service_up(item))
-                        for item in load_presets(presets_path)["services"]]
+            rows = []
+            for item in load_presets(presets_path)["services"]:
+                up = service_up(item, probes)
+                controllable = services is not None and "command" in item
+                state = services.status(item["id"], up) if controllable else dict(state="up" if up else "off", managed=False)
+                rows.append(dict(id=item["id"], row=item.get("row", 1), name=item["name"], modes=item["modes"],
+                                 controllable=controllable, **state))
             key = bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
-            return 200, dict(**launcher.state(), services=services, google_api_key=key)
+            return 200, dict(**launcher.state(), services=rows, google_api_key=key)
+        if method == "POST" and path in ("/api/service/start", "/api/service/stop"):
+            item = next((item for item in load_presets(presets_path)["services"] if item["id"] == body["id"]), None)
+            if services is None or item is None or "command" not in item:
+                raise ValueError(f"Service cannot be controlled: {body['id']}")
+            if path == "/api/service/stop":
+                return 200, dict(stopped=services.stop(item["id"], item.get("signal"), leader_only=item.get("sigint_leader_only", False)))
+            try:
+                services.start(item["id"], item["command"], up=service_up(item, probes), oneshot=item.get("oneshot", False))
+            except RuntimeError as error:
+                return 409, dict(error=str(error))
+            return 200, dict(started=True)
         if method == "GET" and path == "/api/log":
             return 200, dict(**launcher.log(int(query.get("since", ["0"])[0])), **launcher.state())
         if method == "POST" and path == "/api/command":
@@ -213,8 +236,10 @@ def main():
         from tiptop.perception_preview import preview_saved_task
 
         preview_saved_task(args.task_output)
-    launcher = None if args.read_only else RunManager(Path(__file__).resolve().parents[2])
-    server = make_server(args.root, port=args.port, task_output=args.task_output, launcher=launcher)
+    project = Path(__file__).resolve().parents[2]
+    launcher = None if args.read_only else RunManager(project)
+    services = None if args.read_only else ServiceManager(project, project / "Log/services")
+    server = make_server(args.root, port=args.port, task_output=args.task_output, launcher=launcher, services=services)
     print(f"PERCEPTION_VIEWER_READY http://127.0.0.1:{server.server_port}", flush=True)
     try:
         server.serve_forever()

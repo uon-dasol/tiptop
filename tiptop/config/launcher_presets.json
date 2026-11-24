@@ -14,7 +14,8 @@
     "num_particles": "8",
     "table_support": "declared",
     "viewer": true,
-    "surrounding_obstacles": true
+    "surrounding_obstacles": true,
+    "minimal_records": true
   },
   "sam3_reference": {
     "worker_socket": "/tmp/tiptop-{uid}/known-task.sock",
@@ -26,46 +27,156 @@
   "gemini_er": {},
   "services": [
     {
-      "name": "관측 서버",
-      "host": "127.0.0.1",
-      "port": 13348,
+      "id": "container",
+      "row": 1,
+      "name": "도커 컨테이너",
       "modes": [
         "sam3_reference",
         "gemini_er"
-      ]
+      ],
+      "command": "docker start ros2-dev",
+      "oneshot": true,
+      "probe": {
+        "command": [
+          "docker",
+          "exec",
+          "ros2-dev",
+          "true"
+        ]
+      }
     },
     {
+      "id": "foundation_pose",
+      "row": 1,
       "name": "FoundationPose 서버",
       "host": "127.0.0.1",
       "port": 13346,
       "modes": [
         "sam3_reference",
         "gemini_er"
-      ]
+      ],
+      "command": "fp && exec bash scripts/run_foundation_pose_server.sh --preload-objects all"
     },
     {
+      "id": "sam3",
+      "row": 1,
       "name": "SAM3 서버",
       "host": "127.0.0.1",
       "port": 13347,
       "modes": [
         "sam3_reference"
-      ]
+      ],
+      "command": "sam && exec bash scripts/run_sam3_server.sh"
     },
     {
-      "name": "Gateway",
+      "id": "worker",
+      "row": 1,
+      "name": "작업 워커",
+      "socket": "/tmp/tiptop-{uid}/known-task.sock",
+      "modes": [
+        "sam3_reference"
+      ],
+      "command": "exec pixi run python -m tiptop.scripts.serve_known_task_worker --preload-objects all",
+      "sigint_leader_only": true
+    },
+    {
+      "id": "bringup",
+      "row": 2,
+      "name": "로봇 bringup",
+      "modes": [
+        "sam3_reference",
+        "gemini_er"
+      ],
+      "command": "exec docker exec -e PYTHONUNBUFFERED=1 --user ros ros2-dev setsid -w bash -ic 'echo $$ > /tmp/tiptop-bringup.pid; exec ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py name:=dsr01 mode:=real host:=192.168.1.30 rt_host:=192.168.1.30 port:=12345 model:=m1013 gui:=false'",
+      "signal": "docker exec ros2-dev bash -c 'kill -{signal} -- -$(cat /tmp/tiptop-bringup.pid)'",
+      "probe": {
+        "command": [
+          "docker",
+          "exec",
+          "--user",
+          "ros",
+          "ros2-dev",
+          "bash",
+          "-ic",
+          "ros2 node list"
+        ],
+        "match": "/dsr01/dsr_controller2"
+      }
+    },
+    {
+      "id": "controller",
+      "row": 2,
+      "name": "팔 컨트롤러",
+      "modes": [
+        "sam3_reference",
+        "gemini_er"
+      ],
+      "oneshot": true,
+      "command": "docker exec --user ros ros2-dev bash -ic 'ros2 run controller_manager spawner dsr_moveit_controller -c /dsr01/controller_manager'",
+      "probe": {
+        "command": [
+          "docker",
+          "exec",
+          "--user",
+          "ros",
+          "ros2-dev",
+          "bash",
+          "-ic",
+          "ros2 control list_controllers -c /dsr01/controller_manager"
+        ],
+        "match": "dsr_moveit_controller\\s.*\\sactive",
+        "interval": 10
+      }
+    },
+    {
+      "id": "gripper",
+      "row": 2,
+      "name": "그리퍼",
+      "modes": [
+        "sam3_reference",
+        "gemini_er"
+      ],
+      "command": "exec docker exec -e PYTHONUNBUFFERED=1 --user ros ros2-dev setsid -w bash -ic 'echo $$ > /tmp/tiptop-gripper.pid; exec ros2 launch uon_3f_gripper uon_3f_gripper_node.launch.py'",
+      "signal": "docker exec ros2-dev bash -c 'kill -{signal} -- -$(cat /tmp/tiptop-gripper.pid)'",
+      "probe": {
+        "command": [
+          "docker",
+          "exec",
+          "--user",
+          "ros",
+          "ros2-dev",
+          "bash",
+          "-ic",
+          "ros2 node list"
+        ],
+        "match": "/gripper_node"
+      }
+    },
+    {
+      "id": "gateway",
+      "row": 2,
+      "name": "게이트웨이",
       "host": "127.0.0.1",
       "port": 8090,
       "modes": [
         "sam3_reference",
         "gemini_er"
-      ]
+      ],
+      "command": "exec docker exec -e PYTHONUNBUFFERED=1 --user ros ros2-dev setsid -w bash -ic 'echo $$ > /tmp/tiptop-gateway.pid; exec ros2 run tiptop_execution gateway --namespace dsr01 --robot-system real --gripper-config /workspaces/ros2_ws/src/execution/tiptop_execution/config/uon_native.measured.json'",
+      "signal": "docker exec ros2-dev bash -c 'kill -{signal} -- -$(cat /tmp/tiptop-gateway.pid)'"
     },
     {
-      "name": "작업 워커",
-      "socket": "/tmp/tiptop-{uid}/known-task.sock",
+      "id": "observation",
+      "row": 2,
+      "name": "관측 서버",
+      "host": "127.0.0.1",
+      "port": 13348,
       "modes": [
-        "sam3_reference"
-      ]
+        "sam3_reference",
+        "gemini_er"
+      ],
+      "command": "exec pixi run python -m tiptop.scripts.serve_orbbec_observation --calibration tiptop/config/m1013_fixed_camera.declared.json --port 13348 --output tiptop_outputs/m1013/real-observe-review --depth-source sensor",
+      "sigint_leader_only": true
     }
   ]
 }
