@@ -25,27 +25,91 @@ def prefetch_registered_assets(class_id):
         _log.warning("Asset prefetch failed: %s", error)
 
 
-def known_object_detection_context(*, catalog_path=DEFAULT_CATALOG):
+# Added only for tasks whose destination is detected from the image; a fixed destination never reaches the VLM.
+DESTINATION_RULE = (
+    "6. DESTINATION RULE (this overrides the destination handling of TASK 1): when the task puts an object on or "
+    "into a destination that is not a box or a flat surface, you MUST first look at the destination's actual shape "
+    "and choose the part where the object can really be placed (for example the inside of a bowl, cup or tray; "
+    "never its handle, outer wall or rim). Detect ONLY that part, as ONE separate bbox with a unique label such as "
+    "'<destination>_inside' and class_id null, and use it as the second argument of on(). You MUST NOT also detect "
+    "the whole destination object as another bbox. If the destination is a box or a flat surface, detect it "
+    "normally as a whole.\n"
+)
+
+
+def known_object_detection_context(*, catalog_path=DEFAULT_CATALOG, perceived_destination=False):
     """Catalog appearance/labels only; never current positions or simulator state."""
     entries = load_catalog(catalog_path)["objects"]
     rows = [
         dict(
-            class_id=entry["class_id"], aliases=entry["aliases"], visual_description=entry.get("visual_description", "")
+            class_id=entry["class_id"], name_ko=entry.get("name_ko", ""), aliases=entry["aliases"],
+            visual_description=entry.get("visual_description", ""),
         )
         for entry in entries
     ]
+    allowed = json.dumps([row["class_id"] for row in rows])
     return (
         "Known-object catalog (use current image evidence, not the task name alone):\n"
         + json.dumps(rows, ensure_ascii=False)
-        + "\n"
-        "Use the matching canonical class_id as the label for a recognized catalog object. "
-        "The task may use any of its aliases. Do not assign that label to a visually different object. "
-        "If the requested object is not identifiable in the image, return no target predicate."
+        + "\n\nCLASS_ID RULES - THESE ARE MANDATORY:\n"
+        'Each bbox entry MUST be {"box_2d": [ymin, xmin, ymax, xmax], "label": "unique object name", '
+        '"class_id": "an allowed class_id or null", "name_ko": "Korean display name"}.\n'
+        "1. class_id MUST be exactly one of the ALLOWED VALUES below, copied character for character, or null. "
+        "You MUST NEVER shorten, extend, translate or alter a value, and you MUST NEVER add a suffix such as _1, _2 "
+        "or _20G to it. A class_id that is not in the list is an error that fails the whole task.\n"
+        f"ALLOWED VALUES: {allowed}\n"
+        "2. For every detected object that is a catalog object, class_id MUST be its matching allowed value. "
+        "For any other object, class_id MUST be null. Never give a class_id to a visually different object.\n"
+        "3. label is ONLY a unique name, as in Task 1. When several objects share a class_id, you MUST tell their "
+        "labels apart by position or other visible characteristics (for example 'closer' and 'further' relative to "
+        "the robot). Numbers and distinguishing words belong ONLY in label, NEVER in class_id. "
+        "The predicates MUST use these labels.\n"
+        "4. The task may use any of the catalog aliases. If the requested object is not identifiable in the image, "
+        "return no target predicate.\n"
+        "5. NAME RULE: name_ko MUST be a short natural Korean name for display only, written in Hangul with no Latin "
+        "letters. For a catalog object, copy its name_ko from the catalog above; for any other object, write a short "
+        "Korean name of your own (for example '바가지 안쪽'). It does not replace label or class_id.\n"
+        + (DESTINATION_RULE if perceived_destination else "")
+        + "BEFORE YOU ANSWER: check every class_id you wrote against the ALLOWED VALUES; replace any that does not "
+        "match exactly with the correct allowed value, or with null."
     )
 
 
 def normalize_label(value):
     return value.strip().lower().replace(" ", "_")
+
+
+def catalog_class_id(bbox, entries):
+    """Canonical catalog class of a detection: its own `class_id` field, else the label as a legacy alias."""
+    value = bbox["class_id"] if "class_id" in bbox else bbox["label"]
+    if value is None:
+        return None
+    key = normalize_label(value)
+    for entry in entries:
+        if key in {normalize_label(alias) for alias in [entry["class_id"], *entry["aliases"]]}:
+            return entry["class_id"]
+    return None
+
+
+def normalize_known_detections(bboxes, *, catalog_path=DEFAULT_CATALOG):
+    """Give each detection its canonical `class_id`, or None when the VLM named a class outside the catalog."""
+    entries = load_catalog(catalog_path)["objects"]
+    normalized = []
+    for bbox in bboxes:
+        class_id = catalog_class_id(bbox, entries)
+        if "class_id" in bbox:
+            if bbox["class_id"] is not None and class_id is None:
+                _log.warning("Detection %r named class %r, which is not in the catalog", bbox["label"], bbox["class_id"])
+            bbox = dict(bbox, class_id=class_id)
+        elif class_id is not None:
+            bbox = dict(bbox, class_id=class_id)
+        name_ko = bbox.get("name_ko")
+        if "name_ko" in bbox and not (isinstance(name_ko, str) and name_ko.strip()):
+            bbox = {key: value for key, value in bbox.items() if key != "name_ko"}
+        elif "name_ko" in bbox:
+            bbox = dict(bbox, name_ko=name_ko.strip())
+        normalized.append(bbox)
+    return normalized
 
 
 def cad_support_point(vertices_m, world_from_cad):
@@ -180,11 +244,9 @@ def registered_target(bboxes, grounded_atoms, *, catalog_path=DEFAULT_CATALOG):
         label = bbox["label"]
         if label not in target_labels:
             continue
-        class_label = bbox.get("class_id", label)
-        for entry in entries:
-            aliases = {normalize_label(v) for v in [entry["class_id"], *entry["aliases"]]}
-            if normalize_label(class_label) in aliases:
-                matches.append((label, entry["class_id"]))
+        class_id = catalog_class_id(bbox, entries)
+        if class_id is not None:
+            matches.append((label, class_id))
     if len(matches) != 1:
         raise ValueError("Known-DB mode requires one uniquely identified catalog target")
     label, class_id = matches[0]
@@ -200,10 +262,8 @@ async def estimate_registered_grasps(
     if len(indices) != 1:
         raise ValueError("A registered grasp needs one uniquely grounded current instance")
     bbox = visual["bboxes"][indices[0]]
-    class_label = bbox.get("class_id", label)
-    aliases = {normalize_label(value) for value in [entry["class_id"], *entry["aliases"]]}
-    if normalize_label(class_label) not in aliases:
-        raise ValueError(f"{class_label} is not a registered alias of {entry['class_id']}")
+    if catalog_class_id(bbox, [entry]) != entry["class_id"]:
+        raise ValueError(f"{bbox.get('class_id', label)} is not a registered alias of {entry['class_id']}")
     box = bbox.get("box_2d")
     if box is not None and (min(box[:2]) <= 0 or max(box[2:]) >= 1000):
         raise ValueError("Target box touches the image boundary; acquire a complete view before CAD pose estimation")

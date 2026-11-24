@@ -42,6 +42,10 @@ async def detect_and_segment(
         return _bboxes, _grounded_atoms
 
     bboxes, grounded_atoms = await _detect()
+    if object_context is not None:
+        from tiptop.perception.known_objects import normalize_known_detections
+
+        bboxes = normalize_known_detections(bboxes)
     return await segment_detections(rgb, bboxes, grounded_atoms)
 
 

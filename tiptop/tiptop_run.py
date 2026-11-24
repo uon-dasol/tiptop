@@ -670,7 +670,7 @@ async def run_perception(
     if provider == "known_db":
         from tiptop.perception.known_objects import known_object_detection_context
 
-        object_context = known_object_detection_context()
+        object_context = known_object_detection_context(perceived_destination=not pick_only)
     # Share the RGB/depth/mask front end with simulation and future CAD-pose grasps.
     results = await run_visual_perception(
         session,
