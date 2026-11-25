@@ -18,5 +18,16 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 # Upstream server resolves weights relative to code_dir, not scripts/.
 module.code_dir = str(root)
+# Return unused inference buffers to other GPU processes (SAM3/pose/Isaac).
+# Keep model weights loaded; the returned depth is already a CPU numpy array.
+original_inference = module.run_inference
+
+def infer_and_release_cache(*args, **kwargs):
+    try:
+        return original_inference(*args, **kwargs)
+    finally:
+        module.torch.cuda.empty_cache()
+
+module.run_inference = infer_and_release_cache
 uvicorn.run(module.app, host='127.0.0.1', port=int(sys.argv[1]) if len(sys.argv) > 1 else 13344)
 PY
