@@ -201,8 +201,7 @@ def plan_known_task(
     from tiptop.perception.cad_cache import load_cad_mesh
     from tiptop.perception.known_objects import registered_object
     from tiptop.perception.placement import table_support_z
-    from tiptop.doosan.in_place import HOME_DROP_OFFSET_M, SPEED_FACTOR, make_in_place_solver, source_region
-    from tiptop.doosan.home_drop import validate_home_drop_plan
+    from tiptop.doosan.in_place import SPEED_FACTOR
     from tiptop.planning import run_planning, serialize_plan
     from tiptop.task_presets import FIXED_BOX_NAME, TaskSettings, prepare_task_environment
     from tiptop.doosan.place_task import cad_bottom_correction, placement_height_context, run_standard_place, validate_place_plan
@@ -272,25 +271,20 @@ def plan_known_task(
     env, region = prepare_task_environment(env, scene, task, fixed_obstacles=fixed_obstacles)
     obj = next(item for item in env.movables if item.name == name)
     sampled = sample_greedy_surface_spheres(obj, n_spheres=32, sphere_radius=0.003)
-    cad_world = np.asarray(mesh.vertices) @ pose[:3, :3].T + pose[:3, 3]
-    table_bounds = (np.asarray(table.pose[:3]) + np.array([-.5, .5])[:, None]*np.asarray(table.dims))
-    if task.holding_goal and (not region or region.get("source") != "pick_source"):
-        region = source_region(table_bounds, cad_world)
     height_by_surface = {}
-    if not task.holding_goal:
-        from scipy.spatial.transform import Rotation
+    from scipy.spatial.transform import Rotation
 
-        object_pose = np.asarray(obj.pose)
-        world_from_object = np.eye(4)
-        world_from_object[:3, :3] = Rotation.from_quat(object_pose[[4, 5, 6, 3]]).as_matrix()
-        world_from_object[:3, 3] = object_pose[:3]
-        correction = cad_bottom_correction(sampled.cpu().numpy(), world_from_object, pose, hull.vertices)
-        # If a sampled sphere extends below the CAD, preserve upstream's
-        # collision clearance for zero-height placing rather than forcing it
-        # into the box. Positive release heights use the complete CAD bottom.
-        height_by_surface[region["destination"]] = max(0., task.release_height_m + correction)
-        region["cad_bottom_correction_m"] = correction
-        region["sampled_support_height_offset_m"] = height_by_surface[region["destination"]]
+    object_pose = np.asarray(obj.pose)
+    world_from_object = np.eye(4)
+    world_from_object[:3, :3] = Rotation.from_quat(object_pose[[4, 5, 6, 3]]).as_matrix()
+    world_from_object[:3, 3] = object_pose[:3]
+    correction = cad_bottom_correction(sampled.cpu().numpy(), world_from_object, pose, hull.vertices)
+    # If a sampled sphere extends below the CAD, preserve upstream's
+    # collision clearance for zero-height placing rather than forcing it
+    # into the box. Positive release heights use the complete CAD bottom.
+    height_by_surface[region["destination"]] = max(0., task.release_height_m + correction)
+    region["cad_bottom_correction_m"] = correction
+    region["sampled_support_height_offset_m"] = height_by_surface[region["destination"]]
     visual["placement_region"] = region
 
     # Keep the original partial-hull Mesh in both the IK and motion worlds.
@@ -462,10 +456,7 @@ def plan_known_task(
                           "이 순서로 모션 계획을 시도해 처음 성공하면 멈춥니다", "ok")
         return particles
 
-    if task.preset == "home_drop":
-        solver = make_in_place_solver(settings)
-    else:
-        solver = partial(run_standard_place, algorithm.solve_curobo, settings, region, pose, hull.vertices)
+    solver = partial(run_standard_place, algorithm.solve_curobo, settings, region, pose, hull.vertices)
     def logged_solver(*args, **kwargs):
         motion_trials["count"] += 1
         label = f"{motion_trials['count']}/{motion_trials['total']}번째 입자"
@@ -541,14 +532,9 @@ def plan_known_task(
         state = kin.get_state(tensor.to_device(np.asarray(q)[None]))
         return state.ee_pose.get_matrix().cpu().numpy()[0]
 
-    if task.preset == "home_drop":
-        check_name = "home_drop_check"
-        return_check = validate_home_drop_plan(serialized, tcp_at, pose, hull.vertices, task.drop_region(),
-            lift_distance_m=HOME_DROP_OFFSET_M, position_tolerance_m=settings.motion_position_tolerance_m)
-    else:
-        check_name = "placement_check"
-        return_check = validate_place_plan(serialized, tcp_at, pose, hull.vertices, region,
-                                          overhang_tolerance_mm=settings.footprint_overhang_tolerance_mm)
+    check_name = "placement_check"
+    return_check = validate_place_plan(serialized, tcp_at, pose, hull.vertices, region,
+                                      overhang_tolerance_mm=settings.footprint_overhang_tolerance_mm)
     serialized[check_name] = return_check
     collision_registration = dict(
         surrounding_obstacles=visual.get("surrounding_obstacles", True),

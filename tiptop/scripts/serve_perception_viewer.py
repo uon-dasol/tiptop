@@ -109,7 +109,7 @@ def make_server(root, *, port=8091, task_output=None, launcher=None, services=No
                 up = service_up(item, probes)
                 controllable = services is not None and "command" in item
                 state = services.status(item["id"], up) if controllable else dict(state="up" if up else "off", managed=False)
-                rows.append(dict(id=item["id"], row=item.get("row", 1), name=item["name"], modes=item["modes"],
+                rows.append(dict(id=item["id"], row=item.get("row", 1), name=item["name"], modes=item["modes"], only_in=item.get("only_in"),
                                  controllable=controllable, **state))
             key = bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
             return 200, dict(**launcher.state(), services=rows, google_api_key=key)

@@ -64,8 +64,10 @@
       "host": "127.0.0.1",
       "port": 13347,
       "modes": [
-        "sam3_reference"
+        "sam3_reference",
+        "gemini_er"
       ],
+      "only_in": "sam3_reference",
       "command": "sam && exec bash scripts/run_sam3_server.sh"
     },
     {
@@ -74,8 +76,10 @@
       "name": "작업 워커",
       "socket": "/tmp/tiptop-{uid}/known-task.sock",
       "modes": [
-        "sam3_reference"
+        "sam3_reference",
+        "gemini_er"
       ],
+      "only_in": "sam3_reference",
       "command": "exec pixi run python -m tiptop.scripts.serve_known_task_worker --preload-objects all",
       "sigint_leader_only": true
     },

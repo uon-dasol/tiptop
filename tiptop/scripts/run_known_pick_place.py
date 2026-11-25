@@ -84,7 +84,6 @@ class _TimingFormatter(logging.Formatter):
         "tiptop_run": "Pipeline",
         "planning": "cuTAMP",
         "motion_planning": "cuRobo",
-        "in_place": "cuRobo",
         "execute_plan": "Execution",
         "orbbec_camera": "Orbbec",
         "rs_camera": "RealSense",
@@ -360,11 +359,8 @@ async def run(args):
             json.dumps(dict(task_preset=task_settings.preset, instruction=args.task,
                             perception_instruction=perception_instruction, placement_region=region),
                        cls=NumpyEncoder, ensure_ascii=False, indent=2) + "\n")
-        if args._preview is not None and not task_settings.holding_goal:
+        if args._preview is not None:
             args._preview.placement(region, observation.world_from_cam, frame.intrinsics)
-        elif args._preview is not None and task_settings.fixed_box_present:
-            args._preview.placement(task_settings.box_region(), observation.world_from_cam, frame.intrinsics,
-                                    is_destination=task_settings.preset == "home_drop")
         semantic = json.loads((args.output / "semantic-task.json").read_text())
         name = next(iter(scene.grasps))
         index = next(i for i, box in enumerate(visual["bboxes"]) if box["label"] == name)

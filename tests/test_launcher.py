@@ -18,7 +18,7 @@ from tiptop.scripts.serve_perception_viewer import make_server
 ROOT = Path(__file__).resolve().parents[1]
 TASK = "car_leather_conditioner_bottle 집고 박스에 놓아"
 COMMON = [
-    "--task", TASK, "--task-preset", "home_drop",
+    "--task", TASK, "--task-preset", "fixed_box",
     "--max-approach-tilt-deg", "20", "--cad-mask-min-iou", "0.6", "--min-table-clearance-m", "0.01",
     "--max-wrist-travel-deg", "90", "--footprint-overhang-tolerance-mm", "25", "--min-engagement-depth-m", "0.02", "--num-particles", "32",
     "--table-support", "declared",
@@ -27,7 +27,7 @@ COMMON = [
 
 FIXED_PRESETS = dict(
     common=dict(
-        task=TASK, task_preset="home_drop", camera_url="http://127.0.0.1:13348", hardware_profile="tiptop/config/m1013_fixed_hardware.declared.json",
+        task=TASK, task_preset="fixed_box", camera_url="http://127.0.0.1:13348", hardware_profile="tiptop/config/m1013_fixed_hardware.declared.json",
         box_center_x_m=0, box_center_y_m=.31, box_bottom_z_m=0, box_size_x_m=.24, box_size_y_m=.15, box_size_z_m=.11,
         gateway_url="http://127.0.0.1:8090", max_approach_tilt_deg=20, cad_mask_min_iou=0.6, min_table_clearance_m=0.01,
         max_wrist_travel_deg=90, footprint_overhang_tolerance_mm=25, min_engagement_depth_m=0.02, num_particles=32, table_support="declared", viewer=True,
@@ -90,7 +90,6 @@ def test_putting_the_object_in_the_fixed_box_is_the_default_preset():
     from tiptop.task_presets import TASK_PRESETS, TaskSettings
 
     assert TaskSettings().preset == "fixed_box" and TASK_PRESETS["fixed_box"]["label"] == "박스에 놓기"
-    assert TASK_PRESETS["home_drop"]["label"] == "초기 위치에서 박스에 놓기"
     assert load_presets()["presets"]["sam3_reference"]["task_preset"] == "fixed_box"
 
 
@@ -415,3 +414,10 @@ def test_service_api_starts_and_stops_only_services_with_a_configured_command(tm
         services.stop("demo")
         server.shutdown()
         server.server_close()
+
+
+def test_sam3_services_stay_visible_in_gemini_mode_and_are_marked_sam3_only():
+    services = {item["id"]: item for item in load_presets()["services"]}
+    for name in ("sam3", "worker"):
+        assert set(services[name]["modes"]) == set(MODES) and services[name]["only_in"] == "sam3_reference"
+    assert "only_in" not in services["foundation_pose"]

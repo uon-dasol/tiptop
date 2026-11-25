@@ -66,17 +66,6 @@ def test_fixed_box_is_a_solid_place_destination_and_the_box_stays_at_15_cm(scene
     assert sum(item.name == FIXED_BOX_NAME for item in again.statics) == 1
 
 
-def test_switching_between_the_fixed_box_and_the_walled_box_replaces_the_registered_geometry(scene):
-    original, observed, full = scene
-    solid, _ = prepare_task_environment(original, observed, TaskSettings(preset="fixed_box"), fixed_obstacles=[full])
-    walled, _ = prepare_task_environment(solid, observed, TaskSettings(preset="home_drop"), fixed_obstacles=[full])
-    assert all(item.name != FIXED_BOX_NAME for item in walled.statics)
-    assert sum(item.name.startswith(FIXED_BOX_NAME) for item in walled.statics) == 4
-    back, _ = prepare_task_environment(walled, observed, TaskSettings(preset="fixed_box"), fixed_obstacles=[full])
-    assert sum(item.name == FIXED_BOX_NAME for item in back.statics) == 1
-    assert sum(item.name.startswith(FIXED_BOX_NAME) for item in back.statics) == 1
-
-
 def test_fixed_box_only_asks_perception_for_the_object():
     settings = TaskSettings(preset="fixed_box")
     assert settings.perception_instruction("ice_pack 집고 박스에 놓아") == "ice_pack 집어"
@@ -84,36 +73,7 @@ def test_fixed_box_only_asks_perception_for_the_object():
         settings.perception_instruction("ice_pack")
 
 
-def test_home_drop_holds_the_object_and_models_the_box_as_four_5_mm_walls(scene):
-    original, observed, full = scene
-    settings = TaskSettings(preset="home_drop")
-    env, region = prepare_task_environment(original, observed, settings, fixed_obstacles=[full])
-    assert env.goal_state == frozenset({Holding.ground("object")})
-    assert all(item.name != FIXED_BOX_NAME for item in env.statics)
-    walls = {item.name: item for item in env.statics if item.name.startswith(FIXED_BOX_NAME)}
-    assert sorted(walls) == [f"{FIXED_BOX_NAME}_wall_{side}" for side in ("back", "front", "left", "right")]
-    # The walls enclose the original 0.35 x 0.20 x 0.15 m footprint, each 5 mm thick.
-    low = np.min([np.asarray(w.pose[:3]) - np.asarray(w.dims) / 2 for w in walls.values()], axis=0)
-    high = np.max([np.asarray(w.pose[:3]) + np.asarray(w.dims) / 2 for w in walls.values()], axis=0)
-    np.testing.assert_allclose(low, [-.175, .25, 0], atol=1e-9)
-    np.testing.assert_allclose(high, [.175, .45, .15], atol=1e-9)
-    assert walls[f"{FIXED_BOX_NAME}_wall_front"].dims[1] == pytest.approx(.005)
-    assert walls[f"{FIXED_BOX_NAME}_wall_left"].dims[0] == pytest.approx(.005)
-    np.testing.assert_allclose(settings.drop_region()["size_xy_m"], [.34, .19])
-    # Preparing an already prepared environment again keeps exactly the four walls.
-    again, _ = prepare_task_environment(env, observed, settings, fixed_obstacles=[full])
-    assert sum(item.name.startswith(FIXED_BOX_NAME) for item in again.statics) == 4
-    assert len(original.statics) == 1
-
-
-def test_home_drop_only_asks_perception_for_the_object():
-    settings = TaskSettings(preset="home_drop")
-    assert settings.perception_instruction("ice_pack 집고 박스에 놓아") == "ice_pack 집어"
-    with pytest.raises(ValueError, match="박스에 놓기"):
-        settings.perception_instruction("ice_pack")
-
-
-@pytest.mark.parametrize("preset", ["home_drop", "fixed_box", "perceived_surface"])
+@pytest.mark.parametrize("preset", ["fixed_box", "perceived_surface"])
 def test_installed_workspace_box_cannot_be_disabled_by_a_stale_task_payload(preset):
     assert TaskSettings(preset=preset, fixed_box_present=False).fixed_box_present
 
@@ -122,16 +82,16 @@ def test_installed_workspace_box_cannot_be_disabled_by_a_stale_task_payload(pres
 def test_box_must_fit_on_the_real_full_table(scene, options):
     env, observed, full = scene
     with pytest.raises(ValueError, match="tabletop"):
-        prepare_task_environment(env, observed, TaskSettings(preset="home_drop", **options), fixed_obstacles=[full])
+        prepare_task_environment(env, observed, TaskSettings(preset="fixed_box", **options), fixed_obstacles=[full])
     with pytest.raises(ValueError, match="configured_full_table"):
-        prepare_task_environment(env, observed, TaskSettings(preset="home_drop"))
+        prepare_task_environment(env, observed, TaskSettings(preset="fixed_box"))
 
 
 @pytest.mark.parametrize("options", [dict(release_height_m=-.01), dict(release_height_m=float("nan")),
                                     dict(box_size_x_m=0), dict(box_center_y_m=float("inf"))])
 def test_invalid_destination_parameters_are_rejected(options):
     with pytest.raises(ValueError):
-        TaskSettings(preset="home_drop", **options)
+        TaskSettings(preset="fixed_box", **options)
 
 
 def test_perceived_on_goal_reuses_its_surface_and_retains_installed_fixed_box(scene):
@@ -162,12 +122,12 @@ def test_perceived_table_support_is_corrected_once_even_when_prepared_again(scen
 def test_launcher_and_worker_parser_keep_placement_separate_from_perception(mode):
     from tiptop.scripts.run_known_pick_place import parse_args
 
-    values = dict(load_presets()["presets"][mode], task="후추통 집고 박스에 놓아", task_preset="home_drop")
+    values = dict(load_presets()["presets"][mode], task="후추통 집고 박스에 놓아", task_preset="fixed_box")
     for height in (.05, 0):
         command = build_command(mode, dict(values, release_height_m=height), "plan")
         assert not {"--execute", "--check", "--gateway-url"} & set(command)
         args = parse_args(command[3:])
-        assert args.task_settings.preset == "home_drop" and args.task_settings.release_height_m == 0
+        assert args.task_settings.preset == "fixed_box" and args.task_settings.release_height_m == 0
         assert not any(key.startswith("--box-") for key in command)
         # Explicit CLI overrides remain available for deliberate offline experiments.
         args = parse_args([*command[3:], "--release-height-m", str(height)])
@@ -506,7 +466,7 @@ def test_placement_preview_projects_physical_box_and_release_height_separately(t
     import json
     from tiptop.perception_preview import TaskPreview
 
-    region = TaskSettings(preset="home_drop", release_height_m=.05).box_region()
+    region = TaskSettings(preset="fixed_box", release_height_m=.05).box_region()
     preview = TaskPreview(tmp_path, observation_id="offline", task="test", depth_source="saved")
     preview.update("observation", dict(rgb=np.zeros((720,1280,3), np.uint8)))
     camera = np.diag([-1., 1., -1., 1.])

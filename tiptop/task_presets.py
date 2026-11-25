@@ -45,12 +45,7 @@ class TaskSettings:
     @property
     def pick_only(self):
         """Presets whose destination is fixed, so perception only has to find the object to pick."""
-        return self.preset in ("fixed_box", "home_drop")
-
-    @property
-    def holding_goal(self):
-        """Presets planned as a single Pick; the fixed destination is handled after the grasp."""
-        return self.preset == "home_drop"
+        return self.preset == "fixed_box"
 
     def validate_perception_mode(self, mode):
         allowed = TASK_PRESETS[self.preset].get("perception_modes")
@@ -70,27 +65,6 @@ class TaskSettings:
         size = [self.box_size_x_m, self.box_size_y_m, self.box_size_z_m]
         center = [self.box_center_x_m, self.box_center_y_m, self.box_bottom_z_m + size[2] / 2]
         return dict(name=FIXED_BOX_NAME, dims=size, pose=[*center, 1, 0, 0, 0])
-
-    def box_parts(self):
-        """Cuboids registered as the box: one solid block, or four walls when the held object is dropped inside."""
-        solid = self.box_spec()
-        if self.preset != "home_drop":
-            return [solid]
-        thickness = TASK_PRESETS["home_drop"]["box_wall_thickness_m"]
-        (sx, sy, sz), (cx, cy, cz) = solid["dims"], solid["pose"][:3]
-        walls = [("front", [sx, thickness, sz], [cx, cy - (sy - thickness) / 2, cz]),
-                 ("back", [sx, thickness, sz], [cx, cy + (sy - thickness) / 2, cz]),
-                 ("left", [thickness, sy - 2 * thickness, sz], [cx - (sx - thickness) / 2, cy, cz]),
-                 ("right", [thickness, sy - 2 * thickness, sz], [cx + (sx - thickness) / 2, cy, cz])]
-        return [dict(name=f"{FIXED_BOX_NAME}_wall_{side}", dims=dims, pose=[*center, 1, 0, 0, 0])
-                for side, dims, center in walls]
-
-    def drop_region(self):
-        """Free footprint inside the walls and the box top, where a dropped object must end up."""
-        region = self.box_region()
-        thickness = TASK_PRESETS["home_drop"]["box_wall_thickness_m"]
-        region["size_xy_m"] = [size - 2 * thickness for size in region["size_xy_m"]]
-        return region
 
     def box_region(self):
         box = self.box_spec()
@@ -126,8 +100,7 @@ def register_fixed_box(env, settings, fixed_obstacles):
     if any(not isinstance(item, Cuboid) or not np.allclose(item.pose, box.pose)
            or not np.allclose(item.dims, box.dims) for item in previous):
         raise ValueError("Fixed box name collides with another scene object")
-    env.statics = [item for item in env.statics if not item.name.startswith(FIXED_BOX_NAME)] + [
-        Cuboid(**part) for part in settings.box_parts()]
+    env.statics = [item for item in env.statics if item.name != FIXED_BOX_NAME] + [Cuboid(**settings.box_spec())]
     return box
 
 
@@ -135,18 +108,13 @@ def prepare_task_environment(env, scene, settings, *, fixed_obstacles=()):
     """Register a fixed surface or preserve the perceived On goal. Never change the source ROI."""
     from copy import deepcopy
 
-    from cutamp.tamp_domain import HandEmpty, Holding, On
+    from cutamp.tamp_domain import HandEmpty, On
 
     env = deepcopy(env)
     if len(scene.grasps) != 1:
         raise ValueError("A task preset requires exactly one picked object")
     name = next(iter(scene.grasps))
     box = register_fixed_box(env, settings, fixed_obstacles) if settings.fixed_box_present else None
-    if settings.holding_goal:
-        env.goal_state = frozenset({Holding.ground(name)})
-        env.type_to_objects["Surface"] = [scene.table_cuboid]
-        return env, scene.perception_results.get("placement_region")
-
     if settings.preset == "fixed_box":
         env.type_to_objects["Surface"] = [scene.table_cuboid, box]
         env.goal_state = frozenset({On.ground(name, box.name), HandEmpty.ground()})

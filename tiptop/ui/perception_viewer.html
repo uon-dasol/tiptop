@@ -32,7 +32,7 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
 .launcher .mode-options-title{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.launcher .mode-fields{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px}.launcher .mode-fields label.field{min-width:0}@media(max-width:900px){.launcher .mode-fields{grid-template-columns:1fr}}
 .launcher textarea{flex:1;min-width:320px;background:#0c1112;color:var(--cyan);border:1px solid var(--line);border-radius:6px;padding:8px;font:12px ui-monospace,monospace;resize:vertical}
 .launcher pre{margin:0;max-height:240px;overflow:auto;background:#0c1112;border:1px solid var(--line);border-radius:6px;padding:10px;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}
-.launcher .chip{border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px;color:var(--muted)}.launcher .chip.up{color:var(--accent-ink);border-color:var(--accent-dim)}.launcher #svc{flex-direction:column;align-items:flex-start;gap:8px}.launcher .task-row{grid-column:1/-1;display:flex;gap:14px;align-items:end}.launcher .task-row .preset-field{flex:0 0 230px}.launcher .task-row .preset-field+label.field{flex:1}.launcher .chip.starting,.launcher .chip.stopping{color:#e8c46a;border-color:#7a6a2c}.launcher .chip.failed{color:#f08a7a;border-color:#7a3c3c}.launcher .chip button{margin-left:6px;padding:0 6px;font-size:11px;line-height:16px}.launcher .run{background:#b3261e;border-color:#e5534b;color:#fff;font-weight:600}.launcher .run:hover:not(:disabled){background:#cf3a30;border-color:#ff8f80;color:#fff}.launcher .danger{border-color:#f7ad8c;color:#f7ad8c}.launcher .lsep{grid-column:1/-1;color:var(--muted);font-size:11px;letter-spacing:1px;border-top:1px solid var(--line);padding-top:8px}.tools{gap:14px;padding:14px 20px}.tools .group{gap:12px}.tools .check{font-size:13px}.tools .grasp-info{margin-left:auto;display:grid;gap:2px;text-align:right}.tools .grasp-info span{color:var(--muted);font-size:10px;letter-spacing:.7px}.tools .grasp-info strong{font:12px ui-monospace,monospace;color:var(--ink)}
+.launcher .chip{border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px;color:var(--muted)}.launcher .group-box{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:3px 8px}.launcher .group-box .cap{font-size:11px;color:var(--muted)}.launcher .chip.up{color:var(--accent-ink);border-color:var(--accent-dim)}.launcher #svc{flex-direction:column;align-items:flex-start;gap:8px}.launcher .task-row{grid-column:1/-1;display:flex;gap:14px;align-items:end}.launcher .task-row .preset-field{flex:0 0 230px}.launcher .task-row .preset-field+label.field{flex:1}.launcher .chip.starting,.launcher .chip.stopping{color:#e8c46a;border-color:#7a6a2c}.launcher .chip.failed{color:#f08a7a;border-color:#7a3c3c}.launcher .chip button{margin-left:6px;padding:0 6px;font-size:11px;line-height:16px}.launcher .run{background:#b3261e;border-color:#e5534b;color:#fff;font-weight:600}.launcher .run:hover:not(:disabled){background:#cf3a30;border-color:#ff8f80;color:#fff}.launcher .danger{border-color:#f7ad8c;color:#f7ad8c}.launcher .lsep{grid-column:1/-1;color:var(--muted);font-size:11px;letter-spacing:1px;border-top:1px solid var(--line);padding-top:8px}.tools{gap:14px;padding:14px 20px}.tools .group{gap:12px}.tools .check{font-size:13px}.tools .grasp-info{margin-left:auto;display:grid;gap:2px;text-align:right}.tools .grasp-info span{color:var(--muted);font-size:10px;letter-spacing:.7px}.tools .grasp-info strong{font:12px ui-monospace,monospace;color:var(--ink)}
 .launcher .ltop{grid-column:1/-1;display:grid;grid-template-columns:calc((100% + 14px)/3 - 7px) minmax(0,1fr);align-items:center}@media(max-width:900px){.launcher .ltop{display:flex;flex-wrap:wrap;gap:12px}}
 .launcher .lcol{display:flex;flex-direction:column;gap:8px}
 .launcher .push-right{margin-left:auto}dialog.limits{width:min(640px,94vw)}.limits-body{padding:18px 20px;display:grid;gap:14px}.limits-body .lrow{display:flex;gap:12px;align-items:center;justify-content:space-between}.limits-note{color:var(--muted);font-size:12px}.limits-body .msg{font-size:12px;color:#f7ad8c;min-height:16px}
@@ -76,8 +76,6 @@ dialog{width:min(1800px,96vw);max-height:94vh;padding:0;background:var(--bg);col
   <div class="group hidden" id="candidateTools"><label class="range-group">동시 표시 <input type="range" id="count" min="1" max="32" value="1"><span id="countValue">1</span></label><button id="previous" aria-label="이전 파지 후보">←</button><select id="candidate" aria-label="상세 표시할 파지 후보"><option value="">파지 후보 대기</option></select><button id="next" aria-label="다음 파지 후보">→</button><span class="tag" id="candidateIndex">—</span></div>
   <div class="grasp-info" id="graspInfoBox"><span id="graspInfoTitle">FINAL PLANNED GRASP</span><strong id="graspInfo">최종 경로 계획 대기</strong></div>
  </section>
- <div class="subtitle" style="margin-top:10px">점: 열린 모델 손끝점 · 점선과 옅은 면: 같은 TCP 자세의 손가락 범위 (DB 기반)</div>
- <div class="bottom"><span>열린 UON 모델 손끝점 · <span class="finger1">손가락 1</span> / <span class="finger2">손가락 2</span> / <span class="finger3">손가락 3</span> · <span class="axis z">파랑: 접근축</span> · 흰 점: TCP</span><span id="directory">작업 관측 기준</span></div>
 </main>
 <dialog id="limitsDialog" class="limits" aria-labelledby="limitsTitle">
  <div class="limits-body">
@@ -367,7 +365,6 @@ async function poll(){
   const changed=!state||state.observation_id!==next.observation_id;state=next;images=Object.fromEntries(loaded);signature=key;
   $('depthSource').textContent=state.depth_source==='sensor'?'Gemini 336L':state.depth_source==='foundation_stereo'?'FoundationStereo':state.depth_source;
   $('rgbEmpty').classList.toggle('hidden',!!images.rgb);$('depthEmpty').classList.toggle('hidden',!!images.depth);
-  $('directory').textContent=`${state.task_directory} · 작업 관측 기준`;
   if(state.depth_range_m){$('near').textContent=state.depth_range_m[0].toFixed(2)+' m';$('far').textContent=state.depth_range_m[1].toFixed(2)+' m';$('valid').textContent=`유효 깊이 ${state.depth_valid_percent}%`}
   else{$('near').textContent='—';$('far').textContent='—';$('valid').textContent='유효 깊이 —'}
   const select=$('candidate');select.replaceChildren();
@@ -562,6 +559,17 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
    button.textContent=service.managed?'■':'▶';button.title=service.managed?'종료 (Ctrl+C와 동일)':'시작';
    button.onclick=()=>controlService(service);chip.append(button)}
   return chip}
+ function serviceItems(list){
+  const items=[];let group=null;
+  for(const service of list){
+   const chip=serviceChip(service);
+   if(!service.only_in||service.only_in===mode){group=null;items.push(chip);continue}
+   if(!group||group.dataset.only!==service.only_in){
+    group=document.createElement('span');group.className='group-box';group.dataset.only=service.only_in;
+    const cap=document.createElement('span');cap.className='cap';cap.textContent=`${{sam3_reference:'SAM3',gemini_er:'Gemini'}[service.only_in]} 모드에서만 사용`;group.append(cap)
+    items.push(group)}
+   group.append(chip)}
+  return items}
  async function controlService(service){
   if(service.managed&&!confirm(`${service.name}를 종료할까요?`))return;
   try{await api('/api/service/'+(service.managed?'stop':'start'),{id:service.id})}catch(error){$('runMsg').textContent=error.message}
@@ -570,7 +578,7 @@ const LAUNCHER_TOKEN='__LAUNCHER_TOKEN__';
   try{
    const data=await api('/api/status');
    const shown=data.services.filter(service=>service.modes.includes(mode));
-   $('svc').replaceChildren(...[1,2].map(row=>{const line=document.createElement('div');line.className='lrow';line.append(...shown.filter(service=>service.row===row).map(serviceChip));return line}));
+   $('svc').replaceChildren(...[1,2].map(row=>{const line=document.createElement('div');line.className='lrow';line.append(...serviceItems(shown.filter(service=>service.row===row)));return line}));
    if(data.running&&!running){logNext=0;$('runLog').textContent='';pollLog()}else setRunning(data.running);
    $('runMsg').textContent=mode==='gemini_er'&&!data.google_api_key?'GOOGLE_API_KEY가 이 뷰어 서버의 환경에 없습니다. 키가 있는 터미널에서 뷰어를 다시 실행하세요.':'';
   }catch(error){$('runMsg').textContent=error.message}

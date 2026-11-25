@@ -24,7 +24,7 @@ FIELDS = (
     dict(key="task", label="지시문", type="text", modes=None),
     dict(key="release_height_m", label="목적지 상단에서 놓는 높이 (m)", type="number", modes=None,
          tasks=["fixed_box", "perceived_surface"], hidden=True),
-    *[dict(key=key, label=label, type="number", modes=None, tasks=["fixed_box", "home_drop"], hidden=True) for key, label in (
+    *[dict(key=key, label=label, type="number", modes=None, tasks=["fixed_box"], hidden=True) for key, label in (
         ("box_center_x_m", "박스 중심 X (m)"), ("box_center_y_m", "박스 중심 Y (m)"),
         ("box_bottom_z_m", "박스 바닥 Z (m)"), ("box_size_x_m", "박스 X 길이 (m)"),
         ("box_size_y_m", "박스 Y 길이 (m)"), ("box_size_z_m", "박스 높이 (m)"),
