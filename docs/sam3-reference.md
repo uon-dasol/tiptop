@@ -1,117 +1,71 @@
-# SAM3 reference 인식 모드
+# SAM3 reference 인식
 
-`run_known_pick_place`는 `--perception-mode gemini_er|sam3_reference`로 인식 방식을 선택한다.
-기본값은 `tiptop/config/tiptop.yml`의 `perception.mode: gemini_er`다. CLI가 설정 파일보다 우선한다.
+`sam3_reference`는 등록 물체의 reference 이미지와 현재 RGB로 마스크를 구한다. Gemini 없이 FoundationPose·파지 DB·계획·실행으로 이어진다.
+임계값을 넘는 모든 인스턴스의 마스크를 장면에 유지하고, 그중 하나를 파지 대상으로 고른다.
+설치는 [README_CUSTOM](../README_CUSTOM.md#sam3)을 따른다.
 
-| 모드 | 인식 | 지시 | Gemini 사용 |
-| --- | --- | --- | --- |
-| `gemini_er` | Gemini ER 검출 → SAM2 마스크 | 기존 자연어 지시 | 새 지시마다 최대 1회, 명시적 허용 필요 |
-| `sam3_reference` | reference stitching → SAM3 검출·마스크 | 등록 class ID + 집기·빈자리 놓기 | 0회 |
-
-두 경로는 현재 RGB 해상도의 마스크부터 깊이·FoundationPose·파지 DB·빈자리 선택·계획·실행을 공유한다.
-SAM3 모드는 SAM2 모델과 Gemini 클라이언트를 초기화하지 않는다. 클래스당 인스턴스 하나 제약을 유지한다.
-
-## 독립 소스와 환경
-
-SAM3는 `git@github.com:uonrobotics/sam3.git`의 독립 체크아웃 `SAM3/`를 사용한다.
-서버는 `SAM3/tiptop_server/server.py`, TiPToP 실행기는 `tiptop/scripts/sam3_server.py`다.
-data_gen 프로젝트를 실행 의존성으로 사용하지 않는다.
-모델·전처리·후처리는 SAM3 프로세스에서 실행하며 TiPToP Pixi 환경은 HTTP/NumPy 결과만 받는다.
-서버용 모듈은 기존 data_gen batch 예제와 분리돼 있으며, 선택 설치 항목 `tiptop-server`를 사용한다.
-프로젝트 루트에서 서브모듈을 준비하고 별도 환경에 설치한다.
+## 서버
 
 ```bash
-git submodule update --init SAM3
-conda create -n sam3 python=3.12 -y
-conda activate sam3
-python -m pip install 'setuptools<81' numpy==1.26.4 ninja
-python -m pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu128
-python -m pip install -e './SAM3[tiptop-server]'
-python -m pip install 'git+https://github.com/ronghanghu/cc_torch.git@446e9360ed10d3c8d03925ccb5f220ccb62009de'
-```
-
-CUDA 확장 빌드 조건은 [SAM3 README](../SAM3/README.md)의 optional dependencies를 따른다.
-[SAM3 가중치](https://huggingface.co/facebook/sam3)의 접근 권한을 확보하고 `sam3.pt`를 미리 준비한다.
-`SAM3_PYTHON`으로 다른 인터프리터를 지정할 수 있다. 실행기는 항상 프로젝트의 `SAM3/` 소스를 우선한다.
-체크포인트는 기존 Hugging Face 로컬 캐시의 `sam3.pt`를 사용하며 `--checkpoint PATH`로 지정 가능하다.
-실행 중 다운로드하지 않는다. 캐시에 여러 버전이 있으면 사용할 체크포인트를 명시한다.
-
-## 서버 시작
-
-```bash
-bash scripts/run_sam3_server.sh --check
+bash scripts/run_sam3_server.sh --check   # 추론 없이 파일·모듈 검사. SAM3_READY가 나오면 정상
 bash scripts/run_sam3_server.sh
-curl -s http://127.0.0.1:13347/health
 ```
 
-`--check`는 GPU 추론 없이 파일·모듈 존재를 확인한다. `SAM3_READY`는 모델 로드와 포트 바인딩 뒤 출력된다.
-서버는 localhost에만 바인딩하고 GPU 요청을 하나씩 처리한다. 모델은 한 번 로드하고 reference는 캐시한다.
-지시마다 현재 영상을 새로 보내며 이전 ROI·마스크·추론 상태를 재사용하지 않는다.
-reference 원본을 수정한 경우 서버를 재시작해 캐시를 갱신한다.
-`GET /reference?class_id=black_pepper_shaker&scene=Home/Uon_1F_Home/floor`는
-reference 파일·BBox·identity를 검사하며 모델 추론을 하지 않는다. 공통 CLI의 `--check`가 사용한다.
+환경을 찾지 못하면 `SAM3_PYTHON`에 conda Python 경로를 지정한다. 가중치는 로컬 캐시를 쓰며 `--checkpoint PATH`로 지정할 수 있다.
 
-기본 서버 설정:
+| 설정 | 기본값 | 변경 |
+|---|---|---|
+| 포트 | `13347` | `--port` |
+| reference root | `/nas/dasolbyun/sanjabu/test_v2` | `--reference-root` |
+| metadata | `/nas/dasolbyun/sanjabu/2026_real_world_test_objects_attr2.csv` | `--metadata` |
+| scene | `Home/Uon_1F_Home/floor` | 작업 CLI의 `--reference-scene` |
+| 신뢰도 임계값 | `0.5` | 작업 CLI의 `--sam3-confidence-threshold` |
 
-- 포트: `13347` (`--port`)
-- reference root: `/media/uon/data1/Dataset_2026/review/real_v1` (`--reference-root`)
-- metadata: `/media/uon/data1/Dataset_2026/review/2026_real_world_test_objects_metadata.csv` (`--metadata`)
-- confidence: `0.5` (`--confidence-threshold`)
+실험실 작업은 `--reference-scene Lab/Uon_1F_Lab/table`을 쓴다.
+임계값을 요청마다 바꾸려면 서버가 그 값을 받는 버전이어야 하며, 서버가 적용한 값이 요청과 다르면 `[SAM3]` 로그에 경고가 나온다.
+서버 코드나 reference를 바꾸면 서버를 재시작한다.
 
-reference scene 기본값은 `Home/Uon_1F_Home/floor`이며 아래 CLI의 `--reference-scene`으로 선택한다.
-각 scene의 `reference/reference_index.json`에서 이미지·BBox를 찾고 reference metadata identity/hash를 검증한다.
-CAD CSV와 reference CSV의 `obj_NNN` 번호가 다르므로 연결에는 canonical class ID를 쓴다.
-reference 원본은 읽기만 하고 결과는 TiPToP 작업 폴더에 저장한다.
-
-## 서버 API
-
-| 요청 | 기능 |
-| --- | --- |
-| `GET /health` | 모델 준비 상태·소스 경로·추론 횟수 조회 |
-| `GET /reference?class_id=…&scene=…` | reference 이미지·BBox·identity 확인, 추론 없음 |
-| `POST /segment-reference` | 현재 RGB와 reference로 검출·마스크 추론 |
-
-추론 입력은 NumPy NPZ의 `rgb`(uint8 H×W×3), `class_id`(canonical 이름),
-`reference_scene`(reference root 상대 경로)다. 출력 NPZ는 `boxes_xyxy`(N×4 원본 픽셀),
-`masks`(bool N×1×H×W), `scores`(N), `metadata`(JSON 문자열)다.
-미검출은 N=0이며 클라이언트가 작업 실패로 처리한다.
-1008×1008 canvas의 위쪽에는 reference, 아래쪽에는 현재 영상을 letterbox하고,
-아래쪽 검출만 원래 영상 좌표로 복원한다. 현재 영상의 모델 입력 상태는 요청마다 새로 만든다.
-
-## 모드 선택
-
-Isaac GUI·관측 서버와 FoundationStereo·FoundationPose는 [가상 실행 가이드](known-object-pick-place.md#실행-절차)를 따른다.
-모드 선택은 시뮬레이션/실물 어댑터 선택과 독립적이다. 아래 명령은 계획까지만 수행한다.
+## 작업 명령
 
 ```bash
-# Reference 모드: Gemini 허용 옵션·API 키 불필요
 pixi run python -m tiptop.scripts.run_known_pick_place \
-  --perception-mode sam3_reference \
-  --task 'black_pepper_shaker를 집고 빈곳에 놓아'
-
-# 기존 Gemini ER 모드
-pixi run python -m tiptop.scripts.run_known_pick_place \
-  --perception-mode gemini_er --allow-gemini-once \
-  --task '후추통 집고 빈 곳에 놓아'
+  --perception-mode sam3_reference --reference-scene Lab/Uon_1F_Lab/table \
+  --task 'black_pepper_shaker 집고 박스에 놓아' --check
 ```
 
-가상 물리 실행은 GUI를 띄운 뒤 `--execute`를 추가한다. 실물은 기존 측정 프로파일과 명시적 gateway 요건을 유지한다.
-`--check`를 추가하면 새 영상과 서버/reference 연결만 확인하고 종료한다. `--execute`와 함께 줘도
-추론·동작은 수행하지 않는다. 자세한 항목은 [연결 사전 검사](known-object-pick-place.md#연결-사전-검사)를 참고한다.
-접근각 상한은 기본3°이며 자동 확대하지 않는다. 후보가 없으면 실패하며 필요 시 사용자가 조정한다.
-`--interactive`를 추가하면 새 지시마다 관측·추론·계획을 수행한다.
-`--sam3-url`은 서버 주소를, `--reference-scene`은 reference 환경을 바꾼다.
-반복 입력은 선택한 모드를 유지한다. 모드를 바꾸려면 작업 CLI를 해당 옵션으로 다시 실행하면 되고 Isaac 장면을 리셋할 필요는 없다.
+`--check`를 빼면 계획하고, `--execute`를 더하면 동작한다. 나머지 옵션은 [작업 실행](known-object-pick-place.md#실행)을 따른다.
 
-reference 모드의 지시는 `<canonical_class_id>를 집고 빈곳에 놓아` 형식이다.
-`--output`은 생략 가능하다. 기본값은 `tiptop_outputs/m1013/tasks/task-001`이며,
-기존 기록이 있으면 번호를 자동 증가시킨다.
-실제 저장 경로는 `TASK_OUTPUT`(대화형 세션 루트는 `SESSION_OUTPUT`)으로 출력한다.
-한국어 물체명 해석·임의 목적지 지시는 이 모드에서 지원하지 않는다.
-등록되지 않은 클래스, reference 누락, 미검출, 잘못된 마스크는 해당 작업 실패로 기록한다.
-자동 Gemini 전환·다른 환경 reference 재시도·confidence 완화·장면 변경은 하지 않는다.
-SAM3 모드에서는 `--allow-gemini-once`와 진단용 `--active-task`를 함께 사용할 수 없다.
+## 후보 선택
 
-`semantic-task.json`의 `semantic_source`와 `reference_diagnostics`에 reference 경로·identity·점수·선택 후보가 남는다.
-미검출의 reference 진단 정보는 `task-result.json`에 남고 다음 명시적 지시를 받을 수 있다.
-검출 후보가 여러 개이면 최고 점수 하나를 선택한다.
+SAM3의 점수는 참조 박스와 비슷한 정도일 뿐 물체 식별 근거가 아니어서, 최고 점수 후보가 다른 물체일 수 있다. 그래서 후보를 하나씩 검증한다.
+
+1. 점수가 임계값을 넘는 모든 마스크를 장면에 유지하고, 점수 순 상위 최대 8개를 검증한다. 동점은 서버가 준 순서를 따른다.
+2. 후보마다 FoundationPose로 포즈를 추정하고 CAD 실루엣과 마스크의 IoU(`--cad-mask-min-iou`)를 검사한다.
+3. 처음 통과한 후보를 대상으로 쓴다. 모두 거부되면 임계값을 낮추지 않고 중단한다.
+
+- 인스턴스 이름은 `<class>__instance_<서버 인덱스>`이고 canonical class는 `class_id`로 유지한다.
+- `--appearance-ranking`은 reference 박스와의 색 유사도(`--appearance-weight` 배)를 점수에 더해 검증 순서만 바꾼다.
+- 임계값을 낮추면 후보가 늘 뿐 순위는 바뀌지 않는다. 진짜 물체 점수가 임계값 이하면 후보에 오르지 못한다.
+
+### 주변 물체 (`object` reference)
+
+`--surrounding-obstacles`(기본 켜짐)일 때만 SAM3를 한 번 더 호출한다.
+`<reference scene>/reference/object/`에 여러 종류의 물체 예시를 박스로 표시해 두면, 대상이 아닌 물체도 `object__instance_<번호>`로 검출해 장애물 hull로 등록한다.
+
+- 이 호출의 임계값은 0.3 고정이다. 장애물은 거짓 양성보다 미검출이 위험하다.
+- 대상 종류의 검출과 겹치면(한쪽 마스크의 절반 이상이 다른 쪽 안) 같은 물체로 보고 제외한다.
+- `object`는 카탈로그에 없는 범용 이름이라 서버가 카탈로그·ID 검증을 건너뛴다.
+- 대상 검출 직후 시작해 FoundationPose 검증과 동시에 돌고, 대상 후보가 모두 거부되면 취소한다.
+
+### 진단
+
+- 터미널: `[SAM3]`(후보 목록·검증 대상), `[Perception]`(후보별 IoU·CAD 대비 크기·채택/거부).
+- `semantic-task.json`의 `reference_diagnostics.candidate_trials`: 시도한 후보와 IoU.
+- 작업 폴더 `candidates/`: 모든 후보의 크롭(`idx<번호>_<accepted|rejected|skipped>_score<점수>.png`)과 전체를 표시한 `overview.png`.
+
+## Reference 규칙
+
+- scene의 `reference/reference_index.json`에서 이미지와 박스를 읽는다.
+- 물체는 canonical class 이름으로 연결한다. CAD CSV의 `Class_name`과 행 번호 `No`를 구분한다.
+- 한 이미지에 박스가 여럿이면 `bboxes`에 넣고 `bbox`는 첫 번째 박스와 같게 둔다.
+- `GET /health`는 준비 상태, `GET /reference?class_id=…&scene=…`는 reference 유효성을 확인한다.
