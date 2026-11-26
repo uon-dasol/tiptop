@@ -84,7 +84,7 @@ def main():
     if not server.is_file():
         sys.exit(
             f"[ERROR] FoundationPose server not found: {server}. Run `git submodule update --init FoundationPose` "
-            "in the project root (see README_CUSTOM.md, '6. FoundationPose 설치')"
+            "in the project root (see README_CUSTOM.md, '3. FoundationPose')"
         )
     sys.path.insert(0, str(FOUNDATIONPOSE_ROOT))
     from tiptop_server.server import main as serve

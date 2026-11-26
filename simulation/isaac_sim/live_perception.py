@@ -30,12 +30,11 @@ parser.add_argument("--asset-root", type=Path, help="USD root containing <class>
 parser.add_argument("--camera-preparation", type=Path, help="Wrist camera preparation; fixed lab geometry uses --lab")
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--port", type=int, default=13345)
-parser.add_argument("--joint-test", type=Path, help="Run one collision-checked arm-only trial, then keep the window open")
 parser.add_argument("--replay-plan", type=Path, help="Offline contact replay of a saved real-camera plan; no hardware connection")
 args, _ = parser.parse_known_args()
 offline_plan = None
 if args.replay_plan:
-    if not args.lab or args.scene or args.joint_test:
+    if not args.lab or args.scene:
         parser.error("--replay-plan requires --lab and supplies its own single-object scene")
     from plan_client import load_plan
     from tiptop.object_catalog import registered_object
@@ -467,28 +466,6 @@ try:
         other_indices = []
         client.prepare_task()
         status.text = "OFFLINE CONTACT REPLAY: saved real-camera plan. No hardware commands."
-    if args.joint_test:
-        from arm_trial import digest, verify_trial
-
-        plan = verify_trial(args.joint_test)
-        report = dict(success=False, plan_sha256=digest(args.joint_test), physical_commands=0)
-        try:
-            if not args.lab or np.max(np.abs(np.asarray(client.get_joint_positions())-plan["q_init"])) > math.radians(.1):
-                raise ValueError("Arm trial must start at the selected lab home within 0.1 degree")
-            status.text = "ARM ONLY: J1 +5 deg and return, 5 seconds each."
-            execute_cutamp_plan(plan["steps"], client)
-            if np.max(np.abs(np.asarray(client.get_joint_positions())-plan["q_init"])) > math.radians(.1):
-                raise RuntimeError("Trial did not return home within 0.1 degree")
-            report.update(success=True, calls=client.calls, final_state=client.get_state())
-            status.text = "ARM TRIAL PASSED: J1 +5 deg / home. No gripper or hardware commands."
-        except BaseException as error:
-            client.stop()
-            report.update(error=str(error), calls=client.calls)
-            status.text = "ARM TRIAL FAILED: " + str(error)
-            raise
-        finally:
-            (args.joint_test.parent/"sim-result.json").write_text(json.dumps(report, indent=2))
-            print("ARM_TRIAL_RESULT " + json.dumps(report), flush=True)
     while app.is_running() and not (args.output / "close").exists():
         app.update()
         refresh_preview(render=True)

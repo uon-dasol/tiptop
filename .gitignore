@@ -34,6 +34,4 @@ pyzed*.whl
 .claude
 
 # temp
-docs/analysis/
-scripts/analysis/
 Log/

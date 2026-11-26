@@ -1,6 +1,6 @@
 # TiPToP 프로젝트 메모리
 
-갱신: 2026-11-25. 현재 상태·지속할 결정·미완료 작업만 유지한다.
+갱신: 2026-11-26. 현재 상태·지속할 결정·미완료 작업만 유지한다.
 기존 항목을 갱신하고 중복·대체된 내용을 제거한다. 대화 이력·PID·과거 staging·검사 수치를 계속 덧붙이지 않는다.
 설정은 실제 코드/JSON, 커밋·staging은 Git을 다시 확인한다. 실행 중인 서비스가 있다고 가정하지 않는다.
 
@@ -42,7 +42,7 @@
 ## 현재 운영 설정과 좌표
 
 - 카메라 `tiptop/config/m1013_fixed_camera.declared.json`, 하드웨어 `tiptop/config/m1013_fixed_hardware.declared.json`, 그리퍼 `ros2_ws/src/execution/tiptop_execution/config/uon_native.measured.json`을 사용한다.
-- declared/calibrated 플래그는 사용자가 채택한 운영 설정이며 정밀 실측 완료를 뜻하지 않는다. JSON 행렬을 기준으로 읽는다. 하드웨어 note의 예전 +45° 설명은 실제 −60° 행렬과 다르다. note 변경도 계획의 프로필 지문을 바꾸므로 무관한 수정에 섞지 않는다.
+- declared/calibrated 플래그는 사용자가 채택한 운영 설정이며 정밀 실측 완료를 뜻하지 않는다. JSON 행렬을 기준으로 읽는다. 2026-11-26에 두 declared JSON의 note를 짧게 정리해 프로필 지문이 바뀌었다. 이전 지문으로 만든 계획은 물리 실행에서 거부되므로 다시 계획한다. note를 바꾸면 지문도 바뀌므로 무관한 수정에 섞지 않는다.
 - 월드 기준은 ROS base_link, 단위 m/rad다. 실물 DR_BASE(0)와 대조하며 제어기 DR_WORLD(2)를 같은 프레임이라고 가정하지 않는다. GetCurrentPosj는 degree다.
 - 몸체 장착 Z 회전 −90°, body→TCP Z +0.2368508m, spinner 원점 Z +0.1m/회전 180°, 손가락 각도는 spinner의 −2배다.
 - DB→TCP 보정은 **−60°(=300°), 이동 0**. `world_cad @ cad_db @ grasp_mat @ db_grasp_from_tcp`로 목표 TCP를 만든다. DB 원본이나 모델 TCP 높이를 DB 행렬에 다시 더하지 않는다.
@@ -90,13 +90,14 @@
 
 ## 현재 정리 상태와 다음 작업
 
-- 확인한 루트 HEAD는 `3b800ed`(home_drop 제거, 뷰어 화면 개선, 2026-11-25). 이후 상태는 git status/log로 재확인한다.
-- 확인한 gitlink: FoundationPose `24964c3`, SAM3 `29c8db3`, ros2_ws `80a6cb8`(이후 변경은 미확인). ros2_ws/src/drivers는 vcs로 가져온 별도 외부 저장소이며 루트 변경에 통째로 추가하지 않는다. 그리퍼의 패치 적용 상태는 정상 확인했다.
-- 문서(README_CUSTOM·`docs/`의 M1013 문서 15개)는 2026-11-25에 현재 코드 기준으로 다시 정리했고, 신규는 perception-viewer·m1013-real-connection·m1013-gripper-check·m1013-robot-limits·m1013-arm-trial이다. 이 정리는 사용자가 staging했고 커밋은 사용자가 한다. MEMORY 자체를 포함한 추가 staging/commit은 요청 없이 하지 않는다.
-- 유지·커밋된 도구: 지지면 비교(experiments perception table-support), 실물 RGB 확인(preview_orbbec_rgb), 가상 광학 확인(preview_lab_camera). 예전 RT CSV 분석기 analyze_m1013_trace와 중복 재생 도구는 현재 없다.
+- 확인한 루트 HEAD는 `3191dc2`(FoundationStereo 추론 후 GPU 캐시 해제, 2026-11-25). 이후 상태는 git status/log로 재확인한다.
+- 확인한 gitlink: FoundationPose `33c87d4`, SAM3 `d122b07`, ros2_ws `d1165e3`(2026-11-26 원격 jazzy와 일치). ros2_ws/src/drivers는 vcs로 가져온 별도 외부 저장소이며 루트 변경에 통째로 추가하지 않는다. 그리퍼 패치는 2026-11-26 이 PC에서 ros2.repos 고정 revision `dd20b81` 기준으로 적용하고 재검사로 적용 상태를 확인했다. 같은 날 cuTAMP `ordered-grasps` 패치도 적용했고 cuRobo는 이미 적용돼 있었다.
+- 문서(README_CUSTOM·`docs/`의 M1013 문서)는 2026-11-25에 현재 코드 기준으로 다시 정리했고, 신규는 perception-viewer·m1013-real-connection·m1013-gripper-check·m1013-robot-limits다. 2026-11-26에 단계별 검증 문서 5개(m1013-arm-trial·tamp·planning·execution·isaac)를 삭제했고, 필요한 내용은 m1013-real-connection(gateway 상태 확인·정지·완료 기준)과 experiments/README(Isaac 접촉 파지 조건)로 옮겼다. 그 문서 전용이던 scripts/compare_m1013_obstacle·rviz_m1013_tamp·m1013_rviz_scene, simulation/isaac_sim/arm_trial(과 live_perception `--joint-test`), `python -m tiptop.doosan demo|plan`, `plan_showcase`도 함께 제거했다. 이 정리는 2026-11-26 작업이며 커밋은 사용자가 한다. MEMORY 자체를 포함한 추가 staging/commit은 요청 없이 하지 않는다.
+- ros2_ws/docs의 m1013-control·m1013-uon-3f-model은 2026-11-26에 최신화해 ros2_ws 저장소에 커밋·푸시했다(`d1165e3`; 장착 yaw −90° 반영, rosdev alias 설명, `gripper_gui:=false`). 같은 커밋의 `ros2_ws/.github/README.md`는 README_CUSTOM의 상대 링크 보정 복사본이므로 README_CUSTOM을 고치면 둘 다 갱신한다.
+- 유지 도구: 지지면 비교(experiments perception table-support), DB→TCP 정렬 점검(experiments tool check-tcp), 실물 RGB 확인(preview_orbbec_rgb), 가상 광학 확인(preview_lab_camera). 예전 RT CSV 분석기 analyze_m1013_trace와 중복 재생 도구는 현재 없다.
 - 미완료 정리: 로컬 .vscode/·MEMORY.md·외부 FoundationStereo/·저장 시점 lab_pick_view.usda의 커밋 제외 방식. 삭제/이동/ignore 반영이 완료됐다고 가정하지 않는다.
-- FS 실행 스크립트의 추론 후 CUDA 캐시 해제 변경은 미커밋 상태다. 구문·반환/예외 전달은 확인했지만 실제 GPU 메모리/지연 효과는 미측정이다.
-- 검증 범위: 단위 테스트 670개 통과(1개 skip, `integration` 제외)와 문서 링크·앵커 검사. 뷰어 HTML은 headless DOM으로만 확인했고 실제 화면 렌더링·Isaac 접촉 파지·실물 동작은 이번 정리에서 검증하지 않았다. pytest는 ROS를 source한 셸에서 `env -u PYTHONPATH -u AMENT_PREFIX_PATH -u COLCON_PREFIX_PATH -u LD_LIBRARY_PATH pixi run python -m pytest`로 실행한다.
+- FS 실행 스크립트의 추론 후 CUDA 캐시 해제 변경은 `3191dc2`로 커밋됐다. 구문·반환/예외 전달은 확인했지만 실제 GPU 메모리/지연 효과는 미측정이다.
+- 검증 범위: 단위 테스트 662개 통과(1개 skip, `integration` 5개 제외)와 문서 링크·앵커 검사. 뷰어 HTML은 headless DOM으로만 확인했고 실제 화면 렌더링·Isaac 접촉 파지·실물 동작은 이번 정리에서 검증하지 않았다. pytest는 ROS를 source한 셸에서 `env -u PYTHONPATH -u AMENT_PREFIX_PATH -u COLCON_PREFIX_PATH -u LD_LIBRARY_PATH pixi run python -m pytest`로 실행한다. 정식 태스크(`pytest` 엔트리포인트)는 `experiments`를 import하는 테스트가 수집 오류라 쓰지 않는다.
 - 깊이 정확도 비교·정밀 카메라 외부 보정은 사용자 요청으로 보류다. 재개 시 같은 RGB/IR/센서 깊이·마스크·독립 실측값으로 비교한다. 서로 다른 관측의 CAD 자세나 깊이를 정답으로 삼지 않는다.
 - 남은 과제: 케이블 중립각/허용 범위와 후보 선택, count↔손가락 각도 및 접촉 판정 보정, 실물·가상 전체 동작 검증. 카메라 공통 회전/검증을 Doosan 모듈에서 분리하는 작업은 검토만 했으며 미구현이다.
 

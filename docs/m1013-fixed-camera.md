@@ -1,7 +1,6 @@
 # M1013 실험실 가상 고정 카메라
 
 `live_perception.py --lab`은 실물 운영 설정을 공유하는 Isaac 가상 환경이다. 실물 장치에는 연결하지 않는다.
-손목 카메라(`wrist`) 예제는 `--lab` 없이 `config/wrist_camera.json`으로 따로 실행한다.
 
 ## 설정
 
@@ -20,9 +19,7 @@
 - 계획용 카메라 본체·브래킷은 상자 2개이며 여유는 하드웨어 설정의 `collision_margin_m`이다.
 - 설정을 바꾸면 runtime을 재시작하고 새 관측으로 다시 계획한다.
 
-그리퍼는 몸체 장착 −90°, 손가락 배치 180°, TCP 높이 236.8508 mm, DB→TCP 회전 −60°다.
-DB 원본은 유지하고 불러올 때 보정한다. 손가락이 120° 간격이라 `180° − 60° = 120°`로 DB 배치와 맞는다.
-60°·180°·300° 보정은 손가락 배치가 같지만 몸체·케이블 방향이 다르다. −60°(=300°)는 고정값이며 최소 회전 자동 선택은 없다.
+그리퍼 장착·TCP·DB 보정값은 [그리퍼 설정](m1013-gripper-check.md#좌표와-모델)을 따른다.
 
 ## 실행
 
@@ -30,7 +27,7 @@ DB 원본은 유지하고 불러올 때 보정한다. 손가락이 120° 간격�
 Isaac은 ROS/Pixi 환경이 섞이지 않은 별도 터미널에서 실행하고 출력 폴더는 매번 새 이름을 쓴다.
 
 ```bash
-export ISAAC_PYTHON=/home/uon/isaac-sim/6.2.0/python.sh
+export ISAAC_PYTHON="$HOME/isaac-sim/6.2.0/python.sh"   # Isaac Sim 설치 위치에 맞게 지정
 "$ISAAC_PYTHON" --no-ros-env simulation/isaac_sim/live_perception.py --lab \
   --output tiptop_outputs/m1013/isaac/lab-fixed-01/runtime
 ```

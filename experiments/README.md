@@ -21,7 +21,8 @@ pixi run python -m experiments run --case pepper \
   --output tiptop_outputs/experiments/pepper-01 --execute
 ```
 
-대상은 `pepper`·`lotion`·`dipper`다. 결과는 `check.json`에서 확인한다.
+대상은 `pepper`·`lotion`·`dipper`다. 결과는 `check.json`에서 확인하며 `success`와 `physical_grasp_verified`가 `true`이면 집기 성공이다.
+Isaac 내장 Python(`--isaac-python`, 기본은 `ISAAC_PYTHON` 환경 변수, 없으면 `~/isaac-sim/6.2.0/python.sh`)으로 물리 240 Hz, spinner 토크 상한 5 N·m 조건에서 실행한다. 이 토크는 시험 조건이며 실물 정격이 아니다.
 입력은 기본 `tiptop_outputs/experiments/grasping/20261020`, 새 출력은 `tiptop_outputs/experiments/work`를 사용한다.
 다른 경로는 상위 옵션 `--data-root`·`--work-dir`로 지정한다. 입력·결과 파일은 Git에 포함하지 않는다.
 
@@ -56,6 +57,9 @@ pixi run python -m experiments perception table-support -- \
 pixi run python -m experiments tool check-frames
 pixi run python -m experiments tool check-frames --execute
 ```
+
+DB→TCP 가정은 `tool check-tcp`로 점검한다. DB 접촉점을 계획 모델의 손가락 표면에 맞춰 선언값(`db_grasp_from_tcp`)과 Z 회전 후보의 거리를 비교한다.
+raw 기록(`output_grasp`)이 있는 `single_object` DB만 지원하며, 물체는 `-- --object <class_id>`로 고른다.
 
 `tool`은 `--execute` 전에는 설명과 입출력 경로만 표시한다.
 `list`에서 도구와 CPU/GPU/Isaac 요구 사항을 확인하고, 하위 인자는 `--` 뒤에 지정한다.

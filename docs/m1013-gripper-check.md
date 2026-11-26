@@ -18,6 +18,8 @@ world_from_tcp = world_from_cad × cad_from_db × grasp_mat × db_grasp_from_tcp
 
 - DB 원본은 바꾸지 않고 TCP 목표를 계산할 때 보정한다. TCP 높이를 DB 행렬에 다시 더하지 않는다.
 - 손가락은 120° 간격이라 `180° − 60° = 120°`로 DB 손가락 배치와 맞는다. 60°·180°·300°는 손가락 배치가 같지만 몸체·케이블 방향이 다르며, 최소 회전 자동 선택은 없다.
+- [실험 도구](../experiments/README.md)의 `tool check-tcp`로 후추통 등 3개 물체(각 30행)를 확인하면, DB 접촉점이 계획 모델 손가락 표면 0.5 mm 안(중앙값)에 놓이는 Z 회전은 60°·180°·300°뿐이다. 0°·120°·240°는 8~19 mm, 예전 가정 Rx(180°)는 24~30 mm 어긋난다. 세 값 중 무엇인지와 grasp Z 방향 이동은 접촉 기하로 구분되지 않는다.
+- ROS 모델(`mount.yaml`)의 플랜지 → 몸체 Z 회전도 −90°로 같다. spinner 기준 회전만 ROS xacro는 0, TiPToP 계획 URDF는 180°라 두 모델의 손가락 방향이 다르게 보인다.
 - 이 값들은 정밀 실측 보정이 끝난 값이 아니다.
 
 ## 실물 개폐
@@ -43,10 +45,10 @@ world_from_tcp = world_from_cad × cad_from_db × grasp_mat × db_grasp_from_tcp
 접촉 판정 문턱은 그 값에 프로파일 비율(40/50)을 곱해 따라가고, 정지할 때는 마지막 닫기에 쓴 값으로 위치를 유지한다.
 
 열기·닫기 결과(`physical-execution.json`)에는 `trace`로 최대 40개의 `[경과 초, 위치 count, 전류 count]` 샘플이 들어간다. 정지 위치와 전류 문턱을 정하는 근거로 쓴다.
+동작 중 위치·전류 count를 실시간으로 보려면 컨테이너에서 [읽기 전용 모니터](../ros2_ws/README_CUSTOM.md#6-scripts)(`watch_gripper_state.py`)를 쓴다.
 
 ## 해석 주의
 
 - `GripperCommand`의 position·max_effort는 native 위치·전류 count다. m·N 단위가 아니며 count → 관절각 대응은 보정되지 않았다.
 - 전류·정지 여부만으로 물체 접촉과 기구 걸림을 구분할 수 없다.
 - RViz의 개폐 표시는 실제 모터 피드백이나 파지 성공을 증명하지 않는다.
-- 고정 카메라의 로봇 깊이 제거는 관측 관절값과 모델 충돌 구를 쓰므로 장착·보정 오차의 영향을 받는다.

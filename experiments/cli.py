@@ -27,6 +27,7 @@ PERCEPTION_MODULES = {"view": "view_grasps", "observe": "observe", "table-suppor
 TOOLS = {
     "check-frames": ("check_adapter", "CPU: CAD/DB/계획 좌표 변환·물체 식별 검사"),
     "check-db": ("verify_local_db_bridge", "CPU: 세 종류 로컬 DB → 계획 좌표 변환 대조"),
+    "check-tcp": ("check_db_tcp_alignment", "CPU: DB 접촉점을 계획 모델 손가락 표면에 맞춰 DB→TCP 가정을 대조"),
     "audit-close": ("audit_closure_sweep", "CPU: 닫힘 중 책상·다른 물체와의 형상 겹침 검사"),
     "audit-carry": ("audit_multiscene_geometry", "GPU: 운반 물체 전체의 충돌 형상 검사"),
     "prepare-scenes": ("prepare_multiscene", "GPU: 세 물체 배치의 후보·IK 및 접근/들기 경로 준비"),
@@ -52,7 +53,7 @@ def parser():
     run = commands.add_parser("run", help="기존 물리 실험 한 건 재현; 기본은 명령 미리보기")
     run.add_argument("--case", choices=list(CASES), required=True)
     run.add_argument("--output", type=Path)
-    run.add_argument("--isaac-python", type=Path, default=Path("/home/uon/isaac-sim/6.2.0/python.sh"))
+    run.add_argument("--isaac-python", type=Path, default=Path(os.environ.get("ISAAC_PYTHON", Path.home() / "isaac-sim/6.2.0/python.sh")))
     run.add_argument("--headless", action="store_true")
     run.add_argument("--execute", action="store_true", help="실제로 Isaac 실행; 미지정이면 미리보기만")
     perception = commands.add_parser("perception", help="파지 DB 영상 뷰어, 새 카메라 인식 진단, 책상 지지면 비교")

@@ -14,7 +14,7 @@ from experiments.grasping.paths import TOOLS_ROOT, ensure_workdirs, read_json
 from experiments.grasping.paths import WORK_ROOT as W
 
 ensure_workdirs()
-ISAAC = "/home/uon/isaac-sim/6.2.0/python.sh"
+ISAAC = os.environ.get("ISAAC_PYTHON", str(Path.home() / "isaac-sim/6.2.0/python.sh"))
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("manifest", type=Path, help="Prepared experiment manifest; existing results are skipped")
 MODE = str(parser.parse_args().manifest)

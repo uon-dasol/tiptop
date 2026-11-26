@@ -12,7 +12,7 @@ FOUNDATIONPOSE_PYTHON="${FOUNDATIONPOSE_PYTHON:-$HOME/miniforge3/envs/foundation
 
 if [ ! -x "$FOUNDATIONPOSE_PYTHON" ]; then
     echo "ERROR: FoundationPose Python not found: $FOUNDATIONPOSE_PYTHON"
-    echo "Create the 'foundationpose' conda env (README_CUSTOM.md, '6. FoundationPose 설치'),"
+    echo "Create the 'foundationpose' conda env (README_CUSTOM.md, '3. FoundationPose'),"
     echo "or set FOUNDATIONPOSE_PYTHON to an existing interpreter."
     exit 1
 fi

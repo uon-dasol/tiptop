@@ -2,12 +2,12 @@
 
 `sam3_reference`는 등록 물체의 reference 이미지와 현재 RGB로 마스크를 구한다. Gemini 없이 FoundationPose·파지 DB·계획·실행으로 이어진다.
 임계값을 넘는 모든 인스턴스의 마스크를 장면에 유지하고, 그중 하나를 파지 대상으로 고른다.
-설치는 [README_CUSTOM](../README_CUSTOM.md#sam3)을 따른다.
+설치는 [README_CUSTOM](../README_CUSTOM.md#4-sam3)을 따른다.
 
 ## 서버
 
 ```bash
-bash scripts/run_sam3_server.sh --check   # 추론 없이 파일·모듈 검사. SAM3_READY가 나오면 정상
+bash scripts/run_sam3_server.sh --check   # 추론 없이 파일·모듈 검사. SAM3 check: OK가 나오면 정상
 bash scripts/run_sam3_server.sh
 ```
 

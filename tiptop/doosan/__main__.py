@@ -1,4 +1,4 @@
-"""Run from the top workspace: python -m tiptop.doosan status|open|close|stop|demo|plan|run PLAN.json."""
+"""Run from the top workspace: python -m tiptop.doosan status|open|close|stop|run PLAN.json."""
 
 import argparse
 import json
@@ -15,7 +15,7 @@ from tiptop.execute_plan import execute_cutamp_plan
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8090")
-    parser.add_argument("command", choices=["status", "open", "close", "stop", "demo", "plan", "run"])
+    parser.add_argument("command", choices=["status", "open", "close", "stop", "run"])
     parser.add_argument("plan", nargs="?", type=Path)
     args = parser.parse_args()
     client = DoosanUONClient(args.url)
@@ -25,65 +25,10 @@ def main():
         result = client.stop()
     elif args.command in {"open", "close"}:
         result = getattr(client, f"{args.command}_gripper")()
-    elif args.command == "plan":
-        if args.plan is None:
-            args.plan = Path("tiptop_outputs/m1013/showcase.json")
-        from tiptop.doosan.planning import plan_showcase
-
-        try:
-            q = client.get_joint_positions()
-            plan = plan_showcase(q)
-            args.plan.parent.mkdir(parents=True, exist_ok=True)
-            args.plan.write_text(json.dumps(plan, indent=2, allow_nan=False) + "\n")
-            trajectories = [step for step in plan["steps"] if step["type"] == "trajectory"]
-            result = {
-                "success": True,
-                "plan_file": str(args.plan.resolve()),
-                "scene": plan["scene"],
-                "steps": len(plan["steps"]),
-                "sequence": [step["label"] for step in plan["steps"]],
-                "waypoints": sum(len(step["positions"]) for step in trajectories),
-                "requested_duration_s": sum(len(step["positions"]) * step["dt"] for step in trajectories),
-                "joint_offsets_deg": plan["joint_offsets_deg"],
-                "returns_to_start": True,
-                "sent_to_robot": False,
-            }
-        except Exception as exc:
-            result = {"success": False, "error": str(exc), "sent_to_robot": False}
     else:
-        if args.command == "demo":
-            q = client.get_joint_positions()
-            offset = [math.radians(v) for v in [5, -5, 5, 2.5, 2.5, -2.5]]
-            middle = [a + b / 2 for a, b in zip(q, offset)]
-            target = [a + b for a, b in zip(q, offset)]
-            plan = {
-                "version": "1.0.0",
-                "robot_system": 1,
-                "q_init": q,
-                "steps": [
-                    {"type": "gripper", "label": "open", "action": "open"},
-                    {
-                        "type": "trajectory",
-                        "label": "outward",
-                        "positions": [q, middle, target],
-                        "velocities": [[0.0] * 6] * 3,
-                        "dt": 2.0,
-                    },
-                    {"type": "gripper", "label": "close", "action": "close"},
-                    {
-                        "type": "trajectory",
-                        "label": "return",
-                        "positions": [target, middle, q],
-                        "velocities": [[0.0] * 6] * 3,
-                        "dt": 2.0,
-                    },
-                    {"type": "gripper", "label": "open", "action": "open"},
-                ],
-            }
-        else:
-            if args.plan is None:
-                parser.error("run requires PLAN.json")
-            plan = json.loads(args.plan.read_text())
+        if args.plan is None:
+            parser.error("run requires PLAN.json")
+        plan = json.loads(args.plan.read_text())
         if plan.get("version") != "1.0.0":
             parser.error("Expected TiPToP plan version 1.0.0")
         if plan.get("robot_system") == 0:

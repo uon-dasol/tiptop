@@ -54,8 +54,9 @@ pixi run python -m tiptop.scripts.serve_orbbec_observation \
 - 카메라 외부 자세·TCP·DB 정렬·작업 영역을 현장 기준점과 대조한다.
 - 그리퍼 position·effort는 native 위치·전류 count다. m·N으로 해석하지 않는다.
 - 전류·정지 상태만으로 물체 접촉과 기구 걸림을 구분할 수 없다. 파지 성공은 따로 확인한다.
+- 고정 카메라의 로봇 깊이 제거는 관측 관절값과 모델 충돌 구를 쓰므로 장착·보정 오차의 영향을 받는다.
 - 모델·보정을 바꾸면 기존 계획을 재사용하지 않고 다시 관측·계획한다.
 
-추가 측정은 `pixi run python -m tiptop.scripts.calibrate_m1013 --help`로 확인한다.
-손눈 보정은 wrist 전용이고 pivot은 TCP 위치만 구한다. 고정 카메라의 외부 자세는 별도 기준점으로 측정한다.
-wrist 설정 양식은 `tiptop/config/m1013_hardware.example.json`이다.
+추가 측정은 `pixi run python -m tiptop.scripts.calibrate_m1013 --help`로 확인한다. pivot은 TCP 위치만 구하고, 고정 카메라의 외부 자세는 별도 기준점으로 측정한다.
+
+카메라는 고정(`base_link`)만 사용한다. 손목(`link_6`) 장착 경로(`mount: wrist`, 손눈 보정, `m1013_hardware.example.json`)는 구현만 돼 있고 사용·검증하지 않았다.

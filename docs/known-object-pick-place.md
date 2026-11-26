@@ -1,6 +1,6 @@
 # M1013 알려진 물체 집기·박스에 놓기
 
-현재 영상에서 등록된 물체를 인식하고, 파지 DB로 경로를 계획해 집어서 고정 박스에 놓는다.
+현재 영상에서 등록된 물체를 인식하고, 파지 DB로 경로를 계획해 집어서 목적지(고정 박스 또는 Gemini가 찾은 면)에 놓는다.
 가상 환경은 [고정 카메라](m1013-fixed-camera.md), 실물은 [실물 준비](m1013-hardware-preparation.md)를 따른다.
 
 ## 물체 데이터
@@ -15,7 +15,11 @@
 - `cad_root`·`db_root`는 `/nas/ochansol/3d_model/2026_real_world_test_objects`, `/nas/Dataset/Dataset_2026/isaacsim_grasp_data_gen`이다.
 - `additional_datasets`의 폴더(현재 `isaacsim_grasp_data_gen2`)는 폴더 이름을 클래스로 쓰며, 기존 등록 물체와 겹치면 기존 경로가 우선한다.
 - 자산이 없으면 다른 데이터로 대체하지 않고 중단한다.
-- `dataset_v2_object_grasp_compact` DB는 `grasp_mat`이 베이스 자세다. 로더가 `target_points`(로컬 +Z 237 mm)로 파지 원점을 맞춘 뒤 DB→TCP 보정을 적용한다.
+- 행의 `grasp_mat`은 object zero pose 기준 4×4 파지 자세다. `single_object_grasp_compact` DB는 이 위치가 파지 원점이고, `dataset_v2_object_grasp_compact` DB는 베이스 자세라 로더가 `target_points`(로컬 +Z 237 mm)로 파지 원점을 맞춘 뒤 DB→TCP 보정을 적용한다.
+- `approach_vector`는 `grasp_mat`의 세 번째 열(로컬 Z)과 같다.
+- `target_orientation`은 오일러각(°, scipy `xyz`)이며 `grasp_mat`의 회전에 로컬 X축 180°를 곱한 값이다. 파지 자세는 `grasp_mat`만 쓴다.
+- `target_width`는 `0.058`·`0.087`·`0.1015`·`0.116`·`0.145` m 다섯 값 중 하나라 측정된 닫힘 폭이 아니다. 계획에는 쓰지 않고 선택한 행 요약(`selected_grasp.db`)에만 남긴다.
+- `score`는 후보를 정렬하는 시뮬레이션 점수이며 선택한 행 요약(`selected_grasp.db`)에도 남는다. 성공 확률로 해석하지 않으며 파지 라벨은 모두 시뮬레이션에서 나왔다.
 - 물체 파일·로더를 바꾸면 FoundationPose 서버와 상주 worker를 재시작한다.
 
 물체별 닫기 전류는 [그리퍼 설정](m1013-gripper-check.md#물체별-닫기-전류)을 따른다.
